@@ -58,6 +58,19 @@ esp32_improv:
 # Sets up the improv via serial client for Wi-Fi provisioning
 improv_serial:
 
+# Health sensors
+sensor:
+  - platform: wifi_signal
+    id: esp_wifi_signal
+    name: "WiFi Signal"
+    update_interval: 60s
+
+text_sensor:
+  - platform: template  # Human Readable Uptime
+    name: Uptime
+    id: uptime_human
+    icon: mdi:clock-start
+
 captive_portal:
 
 i2c:
