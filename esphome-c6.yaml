@@ -58,227 +58,336 @@ esp32_improv:
 # Sets up the improv via serial client for Wi-Fi provisioning
 improv_serial:
 
+captive_portal:
+
+i2c:
+  sda: GPIO22 # D4
+  scl: GPIO23 # D5
+  scan: true
+
+mpr121:
+  id: mpr121_hub
+  address: 0x5A
+
+# --- GLOBAL STATE TRACKING ---
+globals:
+  - id: g_is_locked
+    type: bool
+    initial_value: 'false'
+  - id: g_leds_enabled
+    type: bool
+    initial_value: 'true'
+  - id: g_fan_speed
+    type: int
+    initial_value: '0' # 0=Off, 1=Sleep, 2=Speed 1, 3=Speed 2, 4=Speed 3
+  - id: g_timer_mode
+    type: int
+    initial_value: '0' # 0=Off, 1=2h, 2=4h, 3=6h, 4=8h
+
+# --- HARDWARE RELAYS / FAN OUTPUTS ---
+output:
+  - platform: gpio
+    pin: GPIO20 # D7
+    id: output_sleep
+  - platform: gpio
+    pin: GPIO9  # D8
+    id: output_speed_1
+  - platform: gpio
+    pin: GPIO8  # D9
+    id: output_speed_2
+  - platform: gpio
+    pin: GPIO1  # D10
+    id: output_speed_3
+
+# --- WS2812 LED STRIP & PARTITIONS ---
 light:
   - platform: esp32_rmt_led_strip
-    id: healthled
-    name: "Health LED"
-    pin: GPIO17
-    num_leds: 1
-    rgb_order: GRB
+    id: addressable_strip
+    pin: GPIO21 # D6
     chipset: WS2812
-    restore_mode: ALWAYS_OFF
-    effects:
-      - addressable_rainbow: {}
+    num_leds: 14
+    rgb_order: GRB
+    name: "Main LED Ring"
 
-interval:
-  - interval: 180s
-    # Two-minute interval to extend the life span of the PMS7003 sensor
-    then:
-      - switch.turn_on: pms_switch
-      - delay: 45s
-      - switch.turn_off: pms_switch
+  # Individual LED Address Maps
+  - platform: partition
+    id: led_u3_power
+    name: "Power LED (U3)"
+    segments:
+      - id: addressable_strip
+        from: 0
+        to: 0
+  - platform: partition
+    id: led_u4_fan_on
+    name: "Fan Indicator (U4)"
+    segments:
+      - id: addressable_strip
+        from: 1
+        to: 1
+  - platform: partition
+    id: led_u5_sleep
+    name: "Sleep Indicator (U5)"
+    segments:
+      - id: addressable_strip
+        from: 2
+        to: 2
+  - platform: partition
+    id: led_u6_timer
+    name: "Timer Indicator (U6)"
+    segments:
+      - id: addressable_strip
+        from: 3
+        to: 3
+  - platform: partition
+    id: led_u7_2h
+    name: "2h Indicator (U7)"
+    segments:
+      - id: addressable_strip
+        from: 4
+        to: 4
+  - platform: partition
+    id: led_u8_4h
+    name: "4h Indicator (U8)"
+    segments:
+      - id: addressable_strip
+        from: 5
+        to: 5
+  - platform: partition
+    id: led_u9_6h
+    name: "6h Indicator (U9)"
+    segments:
+      - id: addressable_strip
+        from: 6
+        to: 6
+  - platform: partition
+    id: led_u10_8h
+    name: "8h Indicator (U10)"
+    segments:
+      - id: addressable_strip
+        from: 7
+        to: 7
+  - platform: partition
+    id: led_u11_leds_toggle
+    name: "LED Mode Indicator (U11)"
+    segments:
+      - id: addressable_strip
+        from: 8
+        to: 8
+  - platform: partition
+    id: led_u12_filter
+    name: "Filter Reset Indicator (U12)"
+    segments:
+      - id: addressable_strip
+        from: 9
+        to: 9
+  - platform: partition
+    id: led_u13_lock
+    name: "Lock Indicator (U13)"
+    segments:
+      - id: addressable_strip
+        from: 10
+        to: 10
+  - platform: partition
+    id: led_u14_speed1
+    name: "Speed 1 Indicator (U14)"
+    segments:
+      - id: addressable_strip
+        from: 11
+        to: 11
+  - platform: partition
+    id: led_u15_speed2
+    name: "Speed 2 Indicator (U15)"
+    segments:
+      - id: addressable_strip
+        from: 12
+        to: 12
+  - platform: partition
+    id: led_u16_speed3
+    name: "Speed 3 Indicator (U16)"
+    segments:
+      - id: addressable_strip
+        from: 13
+        to: 13
 
-# PlantCare A1 Config
-# D0 (GPIO2): Set as Relay2 for RST.
-# D1 (GPIO3): Set as PMS5003 RX.
-# D2 (GPIO4): Set as PMS5003 TX.
-# D4 (GPIO6): Set as Relay1 for SET.
-# D7 (GPIO20): WS2812B-2020
-
-switch:
-  - platform: template
-    name: "PMS7003"
-    internal: true
-    id: pms_switch
-    optimistic: true
-    turn_on_action:
-      - uart.write:
-          id: pms7003_uart
-          data: [0x42, 0x4D, 0xE4, 0x00, 0x01, 0x01, 0x74]
-    turn_off_action:
-      - uart.write:
-          id: pms7003_uart
-          data: [0x42, 0x4D, 0xE4, 0x00, 0x00, 0x01, 0x73]
-
-button:
-  - platform: restart
-    id: restart_button
-    icon: mdi:power-cycle
-    name: "ESP Reboot"
-
-uart:
-  id: pms7003_uart
-  tx_pin: GPIO2
-  rx_pin: GPIO1
-  baud_rate: 9600
-
-sensor:
-  - platform: pmsx003
-    type: PMSX003
-    uart_id: pms7003_uart
-    pm_1_0:
-      name: "PM <1.0µm"
-      id: pm1
-      filters:
-        - sliding_window_moving_average:
-            window_size: 30
-            send_every: 30
-    pm_2_5:
-      name: "PM <2.5µm"
-      id: pm2_5
-      filters:
-        - sliding_window_moving_average:
-            window_size: 30
-            send_every: 30
-    pm_10_0:
-      name: "PM <10.0µm"
-      id: pm10
-      filters:
-        - sliding_window_moving_average:
-            window_size: 30
-            send_every: 30
-
-    # The WHO guidelines work with 24-hour averages of the PM2.5 and PM10 sensors
-  - platform: template
-    name: "PM <2.5µm 24h average"
-    id: pm2_5_avg_24h
-    icon: mdi:chemical-weapon
-    unit_of_measurement: µg/m³
-    lambda: |-
-      return id(pm2_5).state;
-    update_interval: 60s
-    filters:
-      - sliding_window_moving_average:
-          window_size: 1440  # = 24 hours x 60 minutes
-          send_every: 1
-    on_value:
-      then:
-        - script.execute: update_aqi
-  - platform: template
-    name: "PM <10.0µm 24h average"
-    id: pm10_avg_24h
-    icon: mdi:chemical-weapon
-    unit_of_measurement: µg/m³
-    lambda: |-
-      return id(pm10).state;
-    update_interval: 60s
-    filters:
-      - sliding_window_moving_average:
-          window_size: 1440  # = 24 hours x 60 minutes
-          send_every: 1
-    on_value:
-      then:
-        - script.execute: update_aqi
-
-  
-  - platform: wifi_signal
-    id: esp_wifi_signal
-    name: "WiFi Signal"
-    update_interval: 60s
-    
-  # - platform: uptime # Uptime in Seconds
-  #   name: Uptime Sensor
-  #   id: uptime_sensor
-  #   update_interval: 60s
-  #   internal: True
-  #   on_raw_value:
-  #     then:
-  #       - text_sensor.template.publish:
-  #           id: uptime_human
-  #           state: !lambda |-
-  #             int seconds = round(id(uptime_sensor).raw_state);
-  #             int days = seconds / (24 * 3600);
-  #             seconds = seconds % (24 * 3600);
-  #             int hours = seconds / 3600;
-  #             seconds = seconds % 3600;
-  #             int minutes = seconds /  60;
-  #             seconds = seconds % 60;
-  #             return (
-  #               (days ? String(days) + "d " : "") +
-  #               (hours ? String(hours) + "h " : "") +
-  #               (minutes ? String(minutes) + "m " : "") +
-  #               (String(seconds) + "s")
-  #             ).c_str();
-
-
-              
-# A textual presentation of the AQI
-text_sensor:
-  - platform: template
-    name: "Air Quality Index"
-    id: aqi
-    icon: mdi:air-filter
-  - platform: template  # Human Readable Uptime
-    name: Uptime
-    id: uptime_human
-    icon: mdi:clock-start
-
-# This script is called on every update of the relevant sensor values.
+# --- FAN STATE HELPER SCRIPTS ---
 script:
-  - id: update_aqi
-    mode: restart
+  - id: set_fan_speed
+    parameters:
+      target_speed: int
     then:
-      # Bad if at least one of the sensor values is bad
       - if:
           condition:
-            or:
-              - sensor.in_range:
-                  id: pm2_5_avg_24h
-                  above: 25
-              - sensor.in_range:
-                  id: pm10_avg_24h
-                  above: 50
-              - sensor.in_range:
-                  id: pm2_5
-                  above: 500
-              - sensor.in_range:
-                  id: pm10
-                  above: 1000
+            lambda: 'return target_speed != id(g_fan_speed);'
           then:
-            - text_sensor.template.publish:
-                id: aqi
-                state: Bad
-            - light.turn_on:
-                id: healthled
-                brightness: 100%
-                red: 100%
-                green: 0%
-                blue: 0%
-          else:
-            # Acceptable if at least one of the sensor values is acceptable
-            - if:
-                condition:
-                  or:
-                    - sensor.in_range:
-                        id: pm2_5_avg_24h
-                        above: 12
-                    - sensor.in_range:
-                        id: pm10_avg_24h
-                        above: 25
-                    - sensor.in_range:
-                        id: pm2_5
-                        above: 50
-                    - sensor.in_range:
-                        id: pm10
-                        above: 100
-                then:
-                  - text_sensor.template.publish:
-                      id: aqi
-                      state: Acceptable
-                  - light.turn_on:
-                      id: healthled
-                      brightness: 100%
-                      red: 100%
-                      green: 100%
-                      blue: 0%
-                else:
-                  # Otherwise good (all of the sensor values are good)
-                  - text_sensor.template.publish:
-                      id: aqi
-                      state: Good
-                  - light.turn_on:
-                      id: healthled
-                      brightness: 20%
-                      red: 0%
-                      green: 100%
-                      blue: 0%
+            # Turn all outputs off first
+            - output.turn_off: output_sleep
+            - output.turn_off: output_speed_1
+            - output.turn_off: output_speed_2
+            - output.turn_off: output_speed_3
+            - globals.set:
+                id: g_fan_speed
+                value: !lambda 'return target_speed;'
+            # Set targeted pin HIGH
+            - lambda: |-
+                switch(target_speed) {
+                  case 1: id(output_sleep).turn_on(); break;
+                  case 2: id(output_speed_1).turn_on(); break;
+                  case 3: id(output_speed_2).turn_on(); break;
+                  case 4: id(output_speed_3).turn_on(); break;
+                  default: break;
+                }
+            - script.execute: update_led_indicators
+
+  - id: update_led_indicators
+    then:
+      - lambda: |-
+          if (!id(g_leds_enabled)) {
+            id(addressable_strip).turn_off().perform();
+            return;
+          }
+          // Default colors
+          auto white = light::LightColorValues(1.0, 1.0, 1.0, 1.0, 1.0, 1.0);
+          auto off = light::LightColorValues(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+          
+          // Power status LED (U3)
+          if (id(g_fan_speed) > 0) id(led_u3_power).turn_on().perform();
+          else id(led_u3_power).turn_off().perform();
+
+          // Speed LEDs (U4, U5, U14, U15, U16)
+          id(led_u4_fan_on).set_state(id(g_fan_speed) > 0);
+          id(led_u5_sleep).set_state(id(g_fan_speed) == 1);
+          id(led_u14_speed1).set_state(id(g_fan_speed) == 2);
+          id(led_u15_speed2).set_state(id(g_fan_speed) == 3);
+          id(led_u16_speed3).set_state(id(g_fan_speed) == 4);
+
+          // Timer LEDs (U6, U7, U8, U9, U10)
+          id(led_u6_timer).set_state(id(g_timer_mode) > 0);
+          id(led_u7_2h).set_state(id(g_timer_mode) == 1);
+          id(led_u8_4h).set_state(id(g_timer_mode) == 2);
+          id(led_u9_6h).set_state(id(g_timer_mode) == 3);
+          id(led_u10_8h).set_state(id(g_timer_mode) == 4);
+
+          // Controls LEDs
+          id(led_u11_leds_toggle).set_state(id(g_leds_enabled));
+          id(led_u13_lock).set_state(id(g_is_locked));
+
+# --- CAPACITIVE TOUCH BUTTON CONTROLS ---
+binary_sensor:
+  # Lock Button (Channel 3) - Hold to lock/unlock
+  - platform: mpr121
+    mpr121_id: mpr121_hub
+    channel: 3
+    name: "Lock Button"
+    on_multi_click:
+      - timing:
+          - ON for at least 1000ms
+        then:
+          - globals.set:
+              id: g_is_locked
+              value: !lambda 'return !id(g_is_locked);'
+          - logger.log: "Lock State Toggled"
+          - script.execute: update_led_indicators
+
+  # Sleep Button (Channel 4)
+  - platform: mpr121
+    mpr121_id: mpr121_hub
+    channel: 4
+    name: "Sleep Button"
+    on_press:
+      then:
+        - if:
+            condition:
+              lambda: 'return !id(g_is_locked);'
+            then:
+              - script.execute:
+                  id: set_fan_speed
+                  target_speed: 1
+
+  # Timer Button (Channel 5)
+  - platform: mpr121
+    mpr121_id: mpr121_hub
+    channel: 5
+    name: "Timer Button"
+    on_press:
+      then:
+        - if:
+            condition:
+              lambda: 'return !id(g_is_locked);'
+            then:
+              - globals.set:
+                  id: g_timer_mode
+                  value: !lambda |-
+                    int current = id(g_timer_mode);
+                    return (current >= 4) ? 0 : current + 1;
+              - script.execute: update_led_indicators
+
+  # Filter Reset Button (Channel 6) - Hold to action
+  - platform: mpr121
+    mpr121_id: mpr121_hub
+    channel: 6
+    name: "Filter Reset Button"
+    on_multi_click:
+      - timing:
+          - ON for at least 1000ms
+        then:
+          - if:
+              condition:
+                lambda: 'return !id(g_is_locked);'
+              then:
+                - logger.log: "Filter timer reset successfully!"
+                # Custom filter life logic can be added here
+
+  # LED On/Off Toggle (Channel 7)
+  - platform: mpr121
+    mpr121_id: mpr121_hub
+    channel: 7
+    name: "Lights Toggle Button"
+    on_press:
+      then:
+        - globals.set:
+            id: g_leds_enabled
+            value: !lambda 'return !id(g_leds_enabled);'
+        - script.execute: update_led_indicators
+
+  # Power Button (Channel 8)
+  - platform: mpr121
+    mpr121_id: mpr121_hub
+    channel: 8
+    name: "Power Button"
+    on_press:
+      then:
+        - if:
+            condition:
+              lambda: 'return !id(g_is_locked);'
+            then:
+              - if:
+                  condition:
+                    lambda: 'return id(g_fan_speed) > 0;'
+                  then:
+                    - script.execute:
+                        id: set_fan_speed
+                        target_speed: 0
+                  else:
+                    - script.execute:
+                        id: set_fan_speed
+                        target_speed: 2 # Default to Speed 1 on power on
+
+  # Fan Speed Cycle Button (Channel 9)
+  - platform: mpr121
+    mpr121_id: mpr121_hub
+    channel: 9
+    name: "Fan Speed Button"
+    on_press:
+      then:
+        - if:
+            condition:
+              lambda: 'return !id(g_is_locked);'
+            then:
+              - globals.set:
+                  id: g_fan_speed
+                  value: !lambda |-
+                    int next_speed = id(g_fan_speed) + 1;
+                    return (next_speed > 4) ? 2 : next_speed;
+              - script.execute:
+                  id: set_fan_speed
+                  target_speed: !lambda 'return id(g_fan_speed);'
