@@ -71,8 +71,6 @@ text_sensor:
     id: uptime_human
     icon: mdi:clock-start
 
-captive_portal:
-
 i2c:
   id: esp_i2c
   sda: GPIO22 # D4
@@ -93,18 +91,18 @@ globals:
     initial_value: 'true'
   - id: g_fan_speed
     type: int
-    restore_value: max
+    restore_value: true
     initial_value: '0' # 0=Off, 1=Sleep, 2=Speed 1, 3=Speed 2, 4=Speed 3
   - id: g_last_active_speed
     type: int
-    restore_value: max
+    restore_value: true
     initial_value: '2' # Remembers last non-zero speed (Defaults to Speed 1)
   - id: g_timer_mode
     type: int
     initial_value: '0' # 0=Off, 1=2h, 2=4h, 3=6h, 4=8h
   - id: g_filter_runtime_seconds
     type: int
-    restore_value: max
+    restore_value: true
     initial_value: '0' # Accumulated motor runtime in seconds
 
 # --- FILTER RUNTIME TRACKING INTERVAL ---
@@ -398,7 +396,7 @@ binary_sensor:
               - script.execute:
                   id: set_fan_speed
                   target_speed: 0
-              else:
+            else:
               # Resume last active speed (or default to 2 if invalid)
               - script.execute:
                   id: set_fan_speed
