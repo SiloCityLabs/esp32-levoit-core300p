@@ -219,10 +219,12 @@ script:
           // Filter LED Warning Threshold Logic
           int runtime = id(g_filter_runtime_seconds);
           if (runtime >= 28800000) {
+            // 8000 hours blink red
             auto call = id(led_filter).turn_on();
             call.set_effect("Blink Red");
             call.perform();
           } else if (runtime >= 14400000) {
+            // 4000 hours turn on orange
             auto call = id(led_filter).turn_on();
             call.set_effect("None");
             call.set_rgb(1.0, 0.5, 0.0);
