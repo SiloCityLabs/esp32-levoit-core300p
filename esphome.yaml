@@ -1,5 +1,5 @@
 # Description: ESPHome configuration for the ESP32 Air Quality Monitor
-# https://github.com/SiloCityLabs/esp32-airquality
+# https://github.com/SiloCityLabs/esp32-levoit-core300p/
 
 
 # These substitutions allow the end user to override certain values
@@ -74,6 +74,7 @@ text_sensor:
 captive_portal:
 
 i2c:
+  id: esp_i2c
   sda: GPIO22 # D4
   scl: GPIO23 # D5
   scan: true
@@ -82,7 +83,7 @@ mpr121:
   id: mpr121_hub
   address: 0x5A
 
-# --- GLOBAL STATE TRACKING ---
+# --- PERSISTENT GLOBAL STATE TRACKING ---
 globals:
   - id: g_is_locked
     type: bool
@@ -92,10 +93,33 @@ globals:
     initial_value: 'true'
   - id: g_fan_speed
     type: int
+    restore_value: max
     initial_value: '0' # 0=Off, 1=Sleep, 2=Speed 1, 3=Speed 2, 4=Speed 3
+  - id: g_last_active_speed
+    type: int
+    restore_value: max
+    initial_value: '2' # Remembers last non-zero speed (Defaults to Speed 1)
   - id: g_timer_mode
     type: int
     initial_value: '0' # 0=Off, 1=2h, 2=4h, 3=6h, 4=8h
+  - id: g_filter_runtime_seconds
+    type: int
+    restore_value: max
+    initial_value: '0' # Accumulated motor runtime in seconds
+
+# --- FILTER RUNTIME TRACKING INTERVAL ---
+# Tracks active fan runtime and writes to persistent memory
+interval:
+  - interval: 60s
+    then:
+      - if:
+          condition:
+            lambda: 'return id(g_fan_speed) > 0;'
+          then:
+            - globals.set:
+                id: g_filter_runtime_seconds
+                value: !lambda 'return id(g_filter_runtime_seconds) + 60;'
+            - script.execute: update_led_indicators
 
 # --- HARDWARE RELAYS / FAN OUTPUTS ---
 output:
@@ -112,144 +136,28 @@ output:
     pin: GPIO1  # D10
     id: output_speed_3
 
-# --- WS2812 LED STRIP & PARTITIONS ---
-light:
-  - platform: esp32_rmt_led_strip
-    id: addressable_strip
-    pin: GPIO21 # D6
-    chipset: WS2812
-    num_leds: 14
-    rgb_order: GRB
-    name: "Main LED Ring"
-
-  # Individual LED Address Maps
-  - platform: partition
-    id: led_u3_power
-    name: "Power LED (U3)"
-    segments:
-      - id: addressable_strip
-        from: 0
-        to: 0
-  - platform: partition
-    id: led_u4_fan_on
-    name: "Fan Indicator (U4)"
-    segments:
-      - id: addressable_strip
-        from: 1
-        to: 1
-  - platform: partition
-    id: led_u5_sleep
-    name: "Sleep Indicator (U5)"
-    segments:
-      - id: addressable_strip
-        from: 2
-        to: 2
-  - platform: partition
-    id: led_u6_timer
-    name: "Timer Indicator (U6)"
-    segments:
-      - id: addressable_strip
-        from: 3
-        to: 3
-  - platform: partition
-    id: led_u7_2h
-    name: "2h Indicator (U7)"
-    segments:
-      - id: addressable_strip
-        from: 4
-        to: 4
-  - platform: partition
-    id: led_u8_4h
-    name: "4h Indicator (U8)"
-    segments:
-      - id: addressable_strip
-        from: 5
-        to: 5
-  - platform: partition
-    id: led_u9_6h
-    name: "6h Indicator (U9)"
-    segments:
-      - id: addressable_strip
-        from: 6
-        to: 6
-  - platform: partition
-    id: led_u10_8h
-    name: "8h Indicator (U10)"
-    segments:
-      - id: addressable_strip
-        from: 7
-        to: 7
-  - platform: partition
-    id: led_u11_leds_toggle
-    name: "LED Mode Indicator (U11)"
-    segments:
-      - id: addressable_strip
-        from: 8
-        to: 8
-  - platform: partition
-    id: led_u12_filter
-    name: "Filter Reset Indicator (U12)"
-    segments:
-      - id: addressable_strip
-        from: 9
-        to: 9
-  - platform: partition
-    id: led_u13_lock
-    name: "Lock Indicator (U13)"
-    segments:
-      - id: addressable_strip
-        from: 10
-        to: 10
-  - platform: partition
-    id: led_u14_speed1
-    name: "Speed 1 Indicator (U14)"
-    segments:
-      - id: addressable_strip
-        from: 11
-        to: 11
-  - platform: partition
-    id: led_u15_speed2
-    name: "Speed 2 Indicator (U15)"
-    segments:
-      - id: addressable_strip
-        from: 12
-        to: 12
-  - platform: partition
-    id: led_u16_speed3
-    name: "Speed 3 Indicator (U16)"
-    segments:
-      - id: addressable_strip
-        from: 13
-        to: 13
-
-# --- FAN STATE HELPER SCRIPTS ---
+# --- HELPER SCRIPTS ---
 script:
   - id: set_fan_speed
     parameters:
       target_speed: int
     then:
-      - if:
-          condition:
-            lambda: 'return target_speed != id(g_fan_speed);'
-          then:
-            # Turn all outputs off first
-            - output.turn_off: output_sleep
-            - output.turn_off: output_speed_1
-            - output.turn_off: output_speed_2
-            - output.turn_off: output_speed_3
-            - globals.set:
-                id: g_fan_speed
-                value: !lambda 'return target_speed;'
-            # Set targeted pin HIGH
-            - lambda: |-
-                switch(target_speed) {
-                  case 1: id(output_sleep).turn_on(); break;
-                  case 2: id(output_speed_1).turn_on(); break;
-                  case 3: id(output_speed_2).turn_on(); break;
-                  case 4: id(output_speed_3).turn_on(); break;
-                  default: break;
-                }
-            - script.execute: update_led_indicators
+      - output.turn_off: output_sleep
+      - output.turn_off: output_speed_1
+      - output.turn_off: output_speed_2
+      - output.turn_off: output_speed_3
+      - globals.set:
+          id: g_fan_speed
+          value: !lambda 'return target_speed;'
+      - lambda: |-
+          switch(target_speed) {
+            case 1: id(output_sleep).turn_on(); break;
+            case 2: id(output_speed_1).turn_on(); break;
+            case 3: id(output_speed_2).turn_on(); break;
+            case 4: id(output_speed_3).turn_on(); break;
+            default: break;
+          }
+      - script.execute: update_led_indicators
 
   - id: update_led_indicators
     then:
@@ -258,9 +166,6 @@ script:
             id(addressable_strip).turn_off().perform();
             return;
           }
-          // Default colors
-          auto white = light::LightColorValues(1.0, 1.0, 1.0, 1.0, 1.0, 1.0);
-          auto off = light::LightColorValues(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
           
           // Power status LED (U3)
           if (id(g_fan_speed) > 0) id(led_u3_power).turn_on().perform();
@@ -280,17 +185,118 @@ script:
           id(led_u9_6h).set_state(id(g_timer_mode) == 3);
           id(led_u10_8h).set_state(id(g_timer_mode) == 4);
 
-          // Controls LEDs
+          // Control LEDs
           id(led_u11_leds_toggle).set_state(id(g_leds_enabled));
           id(led_u13_lock).set_state(id(g_is_locked));
 
+          // Filter LED (U12) Warning Threshold Logic
+          // 4000 hours = 14,400,000 seconds | 8000 hours = 28,800,000 seconds
+          int runtime = id(g_filter_runtime_seconds);
+          if (runtime >= 28800000) {
+            // Blinking Red (> 8000 hours)
+            auto call = id(led_u12_filter).turn_on();
+            call.set_effect("Blink Red");
+            call.perform();
+          } else if (runtime >= 14400000) {
+            // Solid Orange (> 4000 hours)
+            auto call = id(led_u12_filter).turn_on();
+            call.set_effect("None");
+            call.set_rgb(1.0, 0.5, 0.0);
+            call.perform();
+          } else {
+            // Off (< 4000 hours)
+            id(led_u12_filter).turn_off().perform();
+          }
+
+# --- WS2812 LED STRIP & PARTITIONS ---
+light:
+  - platform: esp32_rmt_led_strip
+    id: addressable_strip
+    pin: GPIO21 # D6
+    chipset: WS2812
+    num_leds: 14
+    rgb_order: GRB
+    name: "Main LED Ring"
+
+  - platform: partition
+    id: led_u3_power
+    name: "Power LED (U3)"
+    segments: [{id: addressable_strip, from: 0, to: 0}]
+  - platform: partition
+    id: led_u4_fan_on
+    name: "Fan Indicator (U4)"
+    segments: [{id: addressable_strip, from: 1, to: 1}]
+  - platform: partition
+    id: led_u5_sleep
+    name: "Sleep Indicator (U5)"
+    segments: [{id: addressable_strip, from: 2, to: 2}]
+  - platform: partition
+    id: led_u6_timer
+    name: "Timer Indicator (U6)"
+    segments: [{id: addressable_strip, from: 3, to: 3}]
+  - platform: partition
+    id: led_u7_2h
+    name: "2h Indicator (U7)"
+    segments: [{id: addressable_strip, from: 4, to: 4}]
+  - platform: partition
+    id: led_u8_4h
+    name: "4h Indicator (U8)"
+    segments: [{id: addressable_strip, from: 5, to: 5}]
+  - platform: partition
+    id: led_u9_6h
+    name: "6h Indicator (U9)"
+    segments: [{id: addressable_strip, from: 6, to: 6}]
+  - platform: partition
+    id: led_u10_8h
+    name: "8h Indicator (U10)"
+    segments: [{id: addressable_strip, from: 7, to: 7}]
+  - platform: partition
+    id: led_u11_leds_toggle
+    name: "LED Mode Indicator (U11)"
+    segments: [{id: addressable_strip, from: 8, to: 8}]
+
+  - platform: partition
+    id: led_u12_filter
+    name: "Filter Reset Indicator (U12)"
+    segments: [{id: addressable_strip, from: 9, to: 9}]
+    effects:
+      - strobe:
+          name: "Blink Red"
+          colors:
+            - state: true
+              brightness: 100%
+              red: 100%
+              green: 0%
+              blue: 0%
+              duration: 500ms
+            - state: false
+              duration: 500ms
+
+  - platform: partition
+    id: led_u13_lock
+    name: "Lock Indicator (U13)"
+    segments: [{id: addressable_strip, from: 10, to: 10}]
+  - platform: partition
+    id: led_u14_speed1
+    name: "Speed 1 Indicator (U14)"
+    segments: [{id: addressable_strip, from: 11, to: 11}]
+  - platform: partition
+    id: led_u15_speed2
+    name: "Speed 2 Indicator (U15)"
+    segments: [{id: addressable_strip, from: 12, to: 12}]
+  - platform: partition
+    id: led_u16_speed3
+    name: "Speed 3 Indicator (U16)"
+    segments: [{id: addressable_strip, from: 13, to: 13}]
+
 # --- CAPACITIVE TOUCH BUTTON CONTROLS ---
 binary_sensor:
-  # Lock Button (Channel 3) - Hold to lock/unlock
+  # Lock Button (Channel 3) - Hold to toggle lock state
   - platform: mpr121
     mpr121_id: mpr121_hub
     channel: 3
     name: "Lock Button"
+    id: button_lock
     on_multi_click:
       - timing:
           - ON for at least 1000ms
@@ -306,6 +312,7 @@ binary_sensor:
     mpr121_id: mpr121_hub
     channel: 4
     name: "Sleep Button"
+    id: button_sleep
     on_press:
       then:
         - if:
@@ -321,6 +328,7 @@ binary_sensor:
     mpr121_id: mpr121_hub
     channel: 5
     name: "Timer Button"
+    id: button_timer
     on_press:
       then:
         - if:
@@ -334,11 +342,12 @@ binary_sensor:
                     return (current >= 4) ? 0 : current + 1;
               - script.execute: update_led_indicators
 
-  # Filter Reset Button (Channel 6) - Hold to action
+  # Filter Reset Button (Channel 6) - Hold to reset runtime counter
   - platform: mpr121
     mpr121_id: mpr121_hub
     channel: 6
     name: "Filter Reset Button"
+    id: button_filter_reset
     on_multi_click:
       - timing:
           - ON for at least 1000ms
@@ -347,49 +356,62 @@ binary_sensor:
               condition:
                 lambda: 'return !id(g_is_locked);'
               then:
-                - logger.log: "Filter timer reset successfully!"
-                # Custom filter life logic can be added here
+                - globals.set:
+                    id: g_filter_runtime_seconds
+                    value: '0'
+                - logger.log: "Filter runtime timer reset to 0."
+                - script.execute: update_led_indicators
 
   # LED On/Off Toggle (Channel 7)
   - platform: mpr121
     mpr121_id: mpr121_hub
     channel: 7
     name: "Lights Toggle Button"
-    on_press:
-      then:
-        - globals.set:
-            id: g_leds_enabled
-            value: !lambda 'return !id(g_leds_enabled);'
-        - script.execute: update_led_indicators
-
-  # Power Button (Channel 8)
-  - platform: mpr121
-    mpr121_id: mpr121_hub
-    channel: 8
-    name: "Power Button"
+    id: button_light
     on_press:
       then:
         - if:
             condition:
               lambda: 'return !id(g_is_locked);'
             then:
-              - if:
-                  condition:
-                    lambda: 'return id(g_fan_speed) > 0;'
-                  then:
-                    - script.execute:
-                        id: set_fan_speed
-                        target_speed: 0
-                  else:
-                    - script.execute:
-                        id: set_fan_speed
-                        target_speed: 2 # Default to Speed 1 on power on
+              - globals.set:
+                  id: g_leds_enabled
+                  value: !lambda 'return !id(g_leds_enabled);'
+              - script.execute: update_led_indicators
+
+  # Power Button (Channel 8)
+  - platform: mpr121
+    mpr121_id: mpr121_hub
+    channel: 8
+    name: "Power Button"
+    id: button_power
+    on_press:
+      then:
+        - if:
+            condition:
+              lambda: 'return !id(g_is_locked);'
+            then:
+              # Save current active speed before turning off
+              - globals.set:
+                  id: g_last_active_speed
+                  value: !lambda 'return id(g_fan_speed);'
+              - script.execute:
+                  id: set_fan_speed
+                  target_speed: 0
+              else:
+              # Resume last active speed (or default to 2 if invalid)
+              - script.execute:
+                  id: set_fan_speed
+                  target_speed: !lambda |-
+                    int target = id(g_last_active_speed);
+                    return (target >= 1 && target <= 4) ? target : 2;
 
   # Fan Speed Cycle Button (Channel 9)
   - platform: mpr121
     mpr121_id: mpr121_hub
     channel: 9
     name: "Fan Speed Button"
+    id: button_fan_speed
     on_press:
       then:
         - if:
