@@ -18,7 +18,7 @@ jobs:
         run: make setup
 
       - name: Build firmware
-        run: make build-all
+        run: make build
 
       - name: Create output directory and move firmwares
         run: mkdir -p firmwares && mv firmware.bin firmwares/
