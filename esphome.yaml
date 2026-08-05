@@ -166,44 +166,44 @@ script:
           }
           
           // Power status LED (U3)
-          if (id(g_fan_speed) > 0) id(led_u3_power).turn_on().perform();
-          else id(led_u3_power).turn_off().perform();
+          if (id(g_fan_speed) > 0) id(led_power).turn_on().perform();
+          else id(led_power).turn_off().perform();
 
           // Speed LEDs (U4, U5, U14, U15, U16)
-          id(led_u4_fan_on).set_state(id(g_fan_speed) > 0);
-          id(led_u5_sleep).set_state(id(g_fan_speed) == 1);
-          id(led_u14_speed1).set_state(id(g_fan_speed) == 2);
-          id(led_u15_speed2).set_state(id(g_fan_speed) == 3);
-          id(led_u16_speed3).set_state(id(g_fan_speed) == 4);
+          id(led_fan_on).set_state(id(g_fan_speed) > 0);
+          id(led_sleep).set_state(id(g_fan_speed) == 1);
+          id(led_speed1).set_state(id(g_fan_speed) == 2);
+          id(led_speed2).set_state(id(g_fan_speed) == 3);
+          id(led_speed3).set_state(id(g_fan_speed) == 4);
 
           // Timer LEDs (U6, U7, U8, U9, U10)
-          id(led_u6_timer).set_state(id(g_timer_mode) > 0);
-          id(led_u7_2h).set_state(id(g_timer_mode) == 1);
-          id(led_u8_4h).set_state(id(g_timer_mode) == 2);
-          id(led_u9_6h).set_state(id(g_timer_mode) == 3);
-          id(led_u10_8h).set_state(id(g_timer_mode) == 4);
+          id(led_timer).set_state(id(g_timer_mode) > 0);
+          id(led_2h).set_state(id(g_timer_mode) == 1);
+          id(led_4h).set_state(id(g_timer_mode) == 2);
+          id(led_6h).set_state(id(g_timer_mode) == 3);
+          id(led_8h).set_state(id(g_timer_mode) == 4);
 
           // Control LEDs
-          id(led_u11_leds_toggle).set_state(id(g_leds_enabled));
-          id(led_u13_lock).set_state(id(g_is_locked));
+          id(led_leds_toggle).set_state(id(g_leds_enabled));
+          id(led_lock).set_state(id(g_is_locked));
 
           // Filter LED (U12) Warning Threshold Logic
           // 4000 hours = 14,400,000 seconds | 8000 hours = 28,800,000 seconds
           int runtime = id(g_filter_runtime_seconds);
           if (runtime >= 28800000) {
             // Blinking Red (> 8000 hours)
-            auto call = id(led_u12_filter).turn_on();
+            auto call = id(led_filter).turn_on();
             call.set_effect("Blink Red");
             call.perform();
           } else if (runtime >= 14400000) {
             // Solid Orange (> 4000 hours)
-            auto call = id(led_u12_filter).turn_on();
+            auto call = id(led_filter).turn_on();
             call.set_effect("None");
             call.set_rgb(1.0, 0.5, 0.0);
             call.perform();
           } else {
             // Off (< 4000 hours)
-            id(led_u12_filter).turn_off().perform();
+            id(led_filter).turn_off().perform();
           }
 
 # --- WS2812 LED STRIP & PARTITIONS ---
@@ -217,45 +217,45 @@ light:
     name: "Main LED Ring"
 
   - platform: partition
-    id: led_u3_power
-    name: "Power LED (U3)"
+    id: led_power
+    name: "Power LED" # U3
     segments: [{id: addressable_strip, from: 0, to: 0}]
   - platform: partition
-    id: led_u4_fan_on
-    name: "Fan Indicator (U4)"
+    id: led_fan_on
+    name: "Fan Indicator" # U4
     segments: [{id: addressable_strip, from: 1, to: 1}]
   - platform: partition
-    id: led_u5_sleep
-    name: "Sleep Indicator (U5)"
+    id: led_sleep
+    name: "Sleep Indicator" # U5
     segments: [{id: addressable_strip, from: 2, to: 2}]
   - platform: partition
-    id: led_u6_timer
-    name: "Timer Indicator (U6)"
+    id: led_timer
+    name: "Timer Indicator" # U6
     segments: [{id: addressable_strip, from: 3, to: 3}]
   - platform: partition
-    id: led_u7_2h
-    name: "2h Indicator (U7)"
+    id: led_2h
+    name: "2h Indicator" # U7
     segments: [{id: addressable_strip, from: 4, to: 4}]
   - platform: partition
-    id: led_u8_4h
-    name: "4h Indicator (U8)"
+    id: led_4h
+    name: "4h Indicator" # U8
     segments: [{id: addressable_strip, from: 5, to: 5}]
   - platform: partition
-    id: led_u9_6h
-    name: "6h Indicator (U9)"
+    id: led_6h
+    name: "6h Indicator" # U9
     segments: [{id: addressable_strip, from: 6, to: 6}]
   - platform: partition
-    id: led_u10_8h
-    name: "8h Indicator (U10)"
+    id: led_8h
+    name: "8h Indicator" # U10
     segments: [{id: addressable_strip, from: 7, to: 7}]
   - platform: partition
-    id: led_u11_leds_toggle
-    name: "LED Mode Indicator (U11)"
+    id: led_leds_toggle
+    name: "LED Mode Indicator" # U11
     segments: [{id: addressable_strip, from: 8, to: 8}]
 
   - platform: partition
-    id: led_u12_filter
-    name: "Filter Reset Indicator (U12)"
+    id: led_filter
+    name: "Filter Reset Indicator" # U12
     segments: [{id: addressable_strip, from: 9, to: 9}]
     effects:
       - strobe:
@@ -271,20 +271,20 @@ light:
               duration: 500ms
 
   - platform: partition
-    id: led_u13_lock
-    name: "Lock Indicator (U13)"
+    id: led_lock
+    name: "Lock Indicator" # U13
     segments: [{id: addressable_strip, from: 10, to: 10}]
   - platform: partition
-    id: led_u14_speed1
-    name: "Speed 1 Indicator (U14)"
+    id: led_speed3
+    name: "Speed 3 Indicator"
     segments: [{id: addressable_strip, from: 11, to: 11}]
   - platform: partition
-    id: led_u15_speed2
-    name: "Speed 2 Indicator (U15)"
+    id: led_speed2
+    name: "Speed 2 Indicator"
     segments: [{id: addressable_strip, from: 12, to: 12}]
   - platform: partition
-    id: led_u16_speed3
-    name: "Speed 3 Indicator (U16)"
+    id: led_speed1
+    name: "Speed 1 Indicator"
     segments: [{id: addressable_strip, from: 13, to: 13}]
 
 # --- CAPACITIVE TOUCH BUTTON CONTROLS ---
