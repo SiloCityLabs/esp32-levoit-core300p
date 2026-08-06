@@ -81,16 +81,33 @@ mpr121:
   id: mpr121_hub
   address: 0x5A
 
-# reset "button" accessible in ESPHome
+# button entities accessible in ESPHome
+# restarts ESP32
 button:
   - platform: restart
     id: restart_button
     icon: mdi:power-cycle
     name: "ESP Reboot"
+# child lock
+switch:
+  - platform: template
+    id: child_lock_button
+    name: "Child Lock"
+    icon: "mid:lock"
+    # id(child_lock_button).state
+    turn_on_action:
+      - logger.log: "Child lock toggled"
+      - script.execute: update_led_indicators
+    turn_off_action:
+      - logger.log: "Child lock toggled"
+      - script.execute: update_led_indicators
 
 # --- PERSISTENT GLOBAL STATE TRACKING ---
 globals:
   - id: g_is_locked
+    type: bool
+    initial_value: 'false'
+  - id: g_is_child_locked
     type: bool
     initial_value: 'false'
   - id: g_leds_enabled
@@ -221,7 +238,7 @@ script:
 
           // Control LEDs
           set_led(id(led_leds_toggle), id(g_leds_enabled));
-          set_led(id(led_lock), id(g_is_locked));
+          set_led(id(led_lock), id(g_is_locked) || id(child_lock_button).state);
 
           // Filter LED Warning Threshold Logic
           int runtime = id(g_filter_runtime_seconds);
@@ -340,11 +357,15 @@ binary_sensor:
       - timing:
           - ON for at least 1000ms
         then:
-          - globals.set:
-              id: g_is_locked
-              value: !lambda 'return !id(g_is_locked);'
-          - logger.log: "Lock State Toggled"
-          - script.execute: update_led_indicators
+          - if:
+              condition:
+                lambda: 'return !id(child_lock_button).state;'
+              then:
+                - globals.set:
+                    id: g_is_locked
+                    value: !lambda 'return !id(g_is_locked);'
+                - logger.log: "Lock State Toggled"
+                - script.execute: update_led_indicators
 
   # Sleep Button (Channel 4)
   - platform: mpr121
@@ -356,7 +377,7 @@ binary_sensor:
       then:
         - if:
             condition:
-              lambda: 'return !id(g_is_locked) && id(g_fan_speed) > 0;'
+              lambda: 'return !id(child_lock_button).state && !id(g_is_locked) && id(g_fan_speed) > 0;'
             then:
               - script.execute:
                   id: set_fan_speed
@@ -372,7 +393,7 @@ binary_sensor:
       then:
         - if:
             condition:
-              lambda: 'return !id(g_is_locked) && id(g_fan_speed) > 0;'
+              lambda: 'return !id(child_lock_button).state && !id(g_is_locked) && id(g_fan_speed) > 0;'
             then:
               - globals.set:
                   id: g_timer_mode
@@ -393,7 +414,7 @@ binary_sensor:
         then:
           - if:
               condition:
-                lambda: 'return !id(g_is_locked) && id(g_fan_speed) > 0;'
+                lambda: 'return !id(child_lock_button).state && !id(g_is_locked) && id(g_fan_speed) > 0;'
               then:
                 - globals.set:
                     id: g_filter_runtime_seconds
@@ -411,7 +432,7 @@ binary_sensor:
       then:
         - if:
             condition:
-              lambda: 'return !id(g_is_locked) && id(g_fan_speed) > 0;'
+              lambda: 'return !id(child_lock_button).state && !id(g_is_locked) && id(g_fan_speed) > 0;'
             then:
               - globals.set:
                   id: g_leds_enabled
@@ -428,7 +449,7 @@ binary_sensor:
       then:
         - if:
             condition:
-              lambda: 'return !id(g_is_locked);'
+              lambda: 'return !id(child_lock_button).state && !id(g_is_locked);'
             then:
               - if:
                   condition:
@@ -459,7 +480,7 @@ binary_sensor:
       then:
         - if:
             condition:
-              lambda: 'return !id(g_is_locked) && id(g_fan_speed) > 0;'
+              lambda: 'return !id(child_lock_button).state && !id(g_is_locked) && id(g_fan_speed) > 0;'
             then:
               - globals.set:
                   id: g_fan_speed
