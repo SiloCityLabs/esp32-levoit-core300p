@@ -81,6 +81,13 @@ mpr121:
   id: mpr121_hub
   address: 0x5A
 
+# reset "button" accessible in ESPHome
+button:
+  - platform: restart
+    id: restart_button
+    icon: mdi:power-cycle
+    name: "ESP Reboot"
+
 # --- PERSISTENT GLOBAL STATE TRACKING ---
 globals:
   - id: g_is_locked
