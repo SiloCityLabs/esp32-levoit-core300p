@@ -6,6 +6,7 @@
 substitutions:
   name: "esp32-levoit-core300p"
   friendly_name: "Fan controller for Levoit Core 300 P"
+  boot_animation_delay: "80ms"
 
   # If you deactivate this it also deactivates the improv_serial option. See here for more info: https://esphome.io/components/improv_serial
   log_level: "INFO"    
@@ -143,6 +144,34 @@ output:
 
 # --- HELPER SCRIPTS ---
 script:
+  - id: turn_on_segment
+    parameters:
+      led_id: int
+    then:
+      - lambda: |-
+          esphome::light::LightState *led = nullptr;
+          switch (led_id) {
+            case 1: led = id(led_fan_on); break;
+            case 2: led = id(led_sleep); break;
+            case 3: led = id(led_timer); break;
+            case 4: led = id(led_2h); break;
+            case 5: led = id(led_4h); break;
+            case 6: led = id(led_6h); break;
+            case 7: led = id(led_8h); break;
+            case 8: led = id(led_leds_toggle); break;
+            case 9: led = id(led_filter); break;
+            case 10: led = id(led_lock); break;
+            case 11: led = id(led_speed3); break;
+            case 12: led = id(led_speed2); break;
+            case 13: led = id(led_speed1); break;
+            default: break;
+          }
+          if (led != nullptr) {
+            auto call = led->turn_on();
+            call.set_brightness(0.8f);
+            call.perform();
+          }
+
   - id: set_fan_speed
     parameters:
       target_speed: int
@@ -166,6 +195,80 @@ script:
             default: break;
           }
       - script.execute: update_led_indicators
+
+  - id: boot_animation
+    then:
+      - script.execute:
+          id: turn_on_segment
+          led_id: 1
+      - delay: ${boot_animation_delay}
+      - script.execute:
+          id: turn_on_segment
+          led_id: 2
+      - delay: ${boot_animation_delay}
+      - script.execute:
+          id: turn_on_segment
+          led_id: 3
+      - delay: ${boot_animation_delay}
+      - script.execute:
+          id: turn_on_segment
+          led_id: 4
+      - delay: ${boot_animation_delay}
+      - script.execute:
+          id: turn_on_segment
+          led_id: 5
+      - delay: ${boot_animation_delay}
+      - script.execute:
+          id: turn_on_segment
+          led_id: 6
+      - delay: ${boot_animation_delay}
+      - script.execute:
+          id: turn_on_segment
+          led_id: 7
+      - delay: ${boot_animation_delay}
+      - script.execute:
+          id: turn_on_segment
+          led_id: 8
+      - delay: ${boot_animation_delay}
+      - script.execute:
+          id: turn_on_segment
+          led_id: 9
+      - delay: ${boot_animation_delay}
+      - script.execute:
+          id: turn_on_segment
+          led_id: 10
+      - delay: ${boot_animation_delay}
+      - script.execute:
+          id: turn_on_segment
+          led_id: 11
+      - delay: ${boot_animation_delay}
+      - script.execute:
+          id: turn_on_segment
+          led_id: 12
+      - delay: ${boot_animation_delay}
+      - script.execute:
+          id: turn_on_segment
+          led_id: 13
+      - delay: ${boot_animation_delay}
+      - lambda: |-
+          auto turn_off_led = [](esphome::light::LightState *led) {
+            if (led != nullptr) {
+              led->turn_off().perform();
+            }
+          };
+          turn_off_led(id(led_fan_on));
+          turn_off_led(id(led_sleep));
+          turn_off_led(id(led_timer));
+          turn_off_led(id(led_2h));
+          turn_off_led(id(led_4h));
+          turn_off_led(id(led_6h));
+          turn_off_led(id(led_8h));
+          turn_off_led(id(led_leds_toggle));
+          turn_off_led(id(led_filter));
+          turn_off_led(id(led_lock));
+          turn_off_led(id(led_speed3));
+          turn_off_led(id(led_speed2));
+          turn_off_led(id(led_speed1));
 
   - id: update_led_indicators
     then:
@@ -443,6 +546,7 @@ binary_sensor:
                         target_speed: 0
                   else:
                     - logger.log: "Power On"
+                    - script.execute: boot_animation
                     - script.execute:
                         id: set_fan_speed
                         target_speed: !lambda |-
