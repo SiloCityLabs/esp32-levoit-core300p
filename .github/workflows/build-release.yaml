@@ -62,7 +62,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          files: firmwares/*
+          files: |
+            firmwares/firmware.bin
           tag_name: v${{ steps.get_version.outputs.version }}
           release_name: Firmware v${{ steps.get_version.outputs.version }}
           draft: true
