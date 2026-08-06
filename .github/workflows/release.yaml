@@ -1,0 +1,86 @@
+name: Release ESPHome Firmware
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Optional build workflow run ID (leave blank for latest successful build)"
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Find latest successful build
+        if: ${{ github.event.inputs.run_id == '' }}
+        id: latest_run
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const runs = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: "build.yaml",
+              branch: "main",
+              status: "completed",
+              per_page: 10
+            });
+
+            const run = runs.data.workflow_runs.find(r => r.conclusion === "success");
+
+            if (!run) {
+              core.setFailed("No successful build workflow found.");
+              return;
+            }
+
+            core.info(`Using workflow run ${run.id}`);
+            core.setOutput("run_id", run.id);
+
+      - name: Select run ID
+        id: run
+        run: |
+          if [ -n "${{ github.event.inputs.run_id }}" ]; then
+            echo "run_id=${{ github.event.inputs.run_id }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_id=${{ steps.latest_run.outputs.run_id }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download firmware artifacts
+        uses: actions/download-artifact@v8
+        with:
+          run-id: ${{ steps.run.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          name: firmware-binaries
+          path: firmwares/
+
+      - name: Extract version from esphome.yaml
+        id: get_version
+        run: |
+          VERSION=$(grep -oP '(?<=version: ")([0-9]+\.[0-9]+\.[0-9]+)' esphome.yaml | head -n1)
+          if [ -z "$VERSION" ]; then
+            echo "Error: could not extract version from esphome.yaml" >&2
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Verify downloaded files
+        run: ls -lh firmwares/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: firmwares/firmware.bin
+          tag_name: v${{ steps.get_version.outputs.version }}
+          name: Firmware v${{ steps.get_version.outputs.version }}
+          draft: true
+          generate_release_notes: true
