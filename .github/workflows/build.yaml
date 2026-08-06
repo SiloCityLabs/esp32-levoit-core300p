@@ -4,7 +4,13 @@ on:
   push:
     branches:
       - main
+    paths:  # filter build trigger
+      - makefile
+      - esphome.yaml
   pull_request:
+    paths:
+      - makefile
+      - esphome.yaml
 
 jobs:
   build:
