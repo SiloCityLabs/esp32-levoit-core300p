@@ -15,11 +15,11 @@ blah blah
 |--------------|-----------------------|----------|
 | GPIO22       | I2C SDA (MPR121)      | D4       |
 | GPIO23       | I2C SCL (MPR121)      | D5       |
-| GPIO21       | PWM LED Output        | D6       |
-| GPIO20       | Fan Relay - Sleep     | D7       |
-| GPIO9        | Fan Relay - Speed 1   | D8       |
-| GPIO8        | Fan Relay - Speed 2   | D9       |
-| GPIO1        | Fan Relay - Speed 3   | D10      |
+| GPIO16       | PWM LED Output        | D6       |
+| GPIO17       | Fan Relay - Sleep     | D7       |
+| GPIO19       | Fan Relay - Speed 1   | D8       |
+| GPIO20       | Fan Relay - Speed 2   | D9       |
+| GPIO18       | Fan Relay - Speed 3   | D10      |
 
 Capacitive buttons
 
