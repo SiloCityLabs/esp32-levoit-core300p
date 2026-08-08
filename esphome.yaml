@@ -146,16 +146,16 @@ interval:
 # --- HARDWARE RELAYS / FAN OUTPUTS ---
 output:
   - platform: gpio
-    pin: GPIO20 # D7
+    pin: GPIO17 # D7
     id: output_sleep
   - platform: gpio
-    pin: GPIO9  # D8
+    pin: GPIO19  # D8
     id: output_speed_1
   - platform: gpio
-    pin: GPIO8  # D9
+    pin: GPIO20  # D9
     id: output_speed_2
   - platform: gpio
-    pin: GPIO1  # D10
+    pin: GPIO18  # D10
     id: output_speed_3
 
 # --- HELPER SCRIPTS ---
@@ -187,6 +187,7 @@ script:
   - id: update_led_indicators
     then:
       - lambda: |-
+          ESP_LOGD("debug lambda", "update_led_indicators");
           // Use g_fan_speed as single source-of-truth for power state.
           // If power is OFF (fan_speed == 0) -> turn off all LEDs except power LED slow-pulse red,
           // but only if LEDs are enabled.
@@ -205,6 +206,7 @@ script:
 
           // Power is ON. If LEDs are disabled globally, ensure strip and power LED are off.
           if (!id(g_leds_enabled)) {
+            ESP_LOGD("debug lambda", "LEDs disabled");
             id(addressable_strip).turn_off().perform();
             id(led_power).turn_off().perform();
             return;
@@ -215,9 +217,11 @@ script:
           p.set_effect("None");
           p.set_rgb(0.0, 1.0, 0.0);
           p.perform();
+          ESP_LOGD("debug lambda", "power LED green");
 
           // Helper lambda for binary light toggles
           auto set_led = [](esphome::light::LightState *led, bool state) {
+            ESP_LOGD("debug lambda", "set_led");
             if (state) led->turn_on().perform();
             else led->turn_off().perform();
           };
@@ -260,13 +264,12 @@ script:
 # --- WS2812 LED STRIP & PARTITIONS ---
 light:
   - platform: esp32_rmt_led_strip
+    name: "Main LED Ring"
+    pin: GPIO16  # D6
     id: addressable_strip
-    pin: GPIO21 # D6
     chipset: WS2812
     num_leds: 14
     rgb_order: GRB
-    name: "Main LED Ring"
-
   - platform: partition
     id: led_power
     name: "Power LED" # U3
@@ -310,7 +313,6 @@ light:
     id: led_leds_toggle
     name: "LED Mode Indicator" # U11
     segments: [{id: addressable_strip, from: 8, to: 8}]
-
   - platform: partition
     id: led_filter
     name: "Filter Reset Indicator" # U12
@@ -327,7 +329,6 @@ light:
               duration: 500ms
             - state: false
               duration: 500ms
-
   - platform: partition
     id: led_lock
     name: "Lock Indicator" # U13
@@ -469,7 +470,6 @@ binary_sensor:
                         target_speed: !lambda |-
                           int target = id(g_last_active_speed);
                           return (target >= 1 && target <= 4) ? target : 2;
-
   # Fan Speed Cycle Button (Channel 9)
   - platform: mpr121
     mpr121_id: mpr121_hub
