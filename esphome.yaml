@@ -351,13 +351,14 @@ binary_sensor:
   # Lock Button (Channel 3) - Hold to toggle lock state
   - platform: mpr121
     mpr121_id: mpr121_hub
-    channel: 3
+    channel: 4
     name: "Lock Button"
     id: button_lock
-    on_multi_click:
-      - timing:
-          - ON for at least 1000ms
+    on_click:
+      - min_length: 500ms
+        max_length: 1000ms
         then:
+          - logger.log: "Lock Btn"
           - if:
               condition:
                 lambda: 'return !id(child_lock_button).state;'
@@ -371,7 +372,7 @@ binary_sensor:
   # Sleep Button (Channel 4)
   - platform: mpr121
     mpr121_id: mpr121_hub
-    channel: 4
+    channel: 3
     name: "Sleep Button"
     id: button_sleep
     on_press:
@@ -387,7 +388,7 @@ binary_sensor:
   # Timer Button (Channel 5)
   - platform: mpr121
     mpr121_id: mpr121_hub
-    channel: 5
+    channel: 7
     name: "Timer Button"
     id: button_timer
     on_press:
@@ -406,7 +407,7 @@ binary_sensor:
   # Filter Reset Button (Channel 6) - Hold to reset runtime counter
   - platform: mpr121
     mpr121_id: mpr121_hub
-    channel: 6
+    channel: 4
     name: "Filter Reset Button"
     id: button_filter_reset
     on_multi_click:
@@ -426,7 +427,7 @@ binary_sensor:
   # LED On/Off Toggle (Channel 7)
   - platform: mpr121
     mpr121_id: mpr121_hub
-    channel: 7
+    channel: 5
     name: "Lights Toggle Button"
     id: button_light
     on_press:
@@ -473,7 +474,7 @@ binary_sensor:
   # Fan Speed Cycle Button (Channel 9)
   - platform: mpr121
     mpr121_id: mpr121_hub
-    channel: 9
+    channel: 6
     name: "Fan Speed Button"
     id: button_fan_speed
     on_press:
