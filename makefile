@@ -30,3 +30,7 @@ build: ## Build the ESP32-C6 firmware
 flash: ## Flash the firmware to test device
 	source .venv/bin/activate && \
 	esphome upload esphome.yaml --device /dev/ttyACM0
+
+logs: ## Stream serial logs from the device
+	source .venv/bin/activate && \
+	esphome logs esphome.yaml --device /dev/ttyACM0

@@ -8,7 +8,7 @@ substitutions:
   friendly_name: "Fan controller for Levoit Core 300 P"
 
   # If you deactivate this it also deactivates the improv_serial option. See here for more info: https://esphome.io/components/improv_serial
-  log_level: "INFO"    
+  log_level: "INFO"
 
 esphome:
   name: "${name}"
@@ -80,6 +80,8 @@ i2c:
 mpr121:
   id: mpr121_hub
   address: 0x5A
+  touch_threshold: 8
+  release_threshold: 5
 
 # button entities accessible in ESPHome
 # restarts ESP32
@@ -222,8 +224,12 @@ script:
           // Helper lambda for binary light toggles
           auto set_led = [](esphome::light::LightState *led, bool state) {
             ESP_LOGD("debug lambda", "set_led");
-            if (state) led->turn_on().perform();
-            else led->turn_off().perform();
+            if (state) {
+              auto call = led->turn_on();
+              call.perform();
+            } else {
+              led->turn_off().perform();
+            }
           };
 
           // Speed LEDs
@@ -284,39 +290,39 @@ light:
   - platform: partition
     id: led_fan_on
     name: "Fan Indicator" # U4
-    segments: [{id: addressable_strip, from: 1, to: 1}]
+    segments: [{id: addressable_strip, from: 10, to: 10}]
   - platform: partition
     id: led_sleep
     name: "Sleep Indicator" # U5
-    segments: [{id: addressable_strip, from: 2, to: 2}]
+    segments: [{id: addressable_strip, from: 9, to: 9}]
   - platform: partition
     id: led_timer
     name: "Timer Indicator" # U6
-    segments: [{id: addressable_strip, from: 3, to: 3}]
+    segments: [{id: addressable_strip, from: 8, to: 8}]
   - platform: partition
     id: led_2h
     name: "2h Indicator" # U7
-    segments: [{id: addressable_strip, from: 4, to: 4}]
+    segments: [{id: addressable_strip, from: 7, to: 7}]
   - platform: partition
     id: led_4h
     name: "4h Indicator" # U8
-    segments: [{id: addressable_strip, from: 5, to: 5}]
+    segments: [{id: addressable_strip, from: 6, to: 6}]
   - platform: partition
     id: led_6h
     name: "6h Indicator" # U9
-    segments: [{id: addressable_strip, from: 6, to: 6}]
+    segments: [{id: addressable_strip, from: 5, to: 5}]
   - platform: partition
     id: led_8h
     name: "8h Indicator" # U10
-    segments: [{id: addressable_strip, from: 7, to: 7}]
+    segments: [{id: addressable_strip, from: 4, to: 4}]
   - platform: partition
     id: led_leds_toggle
     name: "LED Mode Indicator" # U11
-    segments: [{id: addressable_strip, from: 8, to: 8}]
+    segments: [{id: addressable_strip, from: 3, to: 3}]
   - platform: partition
     id: led_filter
     name: "Filter Reset Indicator" # U12
-    segments: [{id: addressable_strip, from: 9, to: 9}]
+    segments: [{id: addressable_strip, from: 2, to: 2}]
     effects:
       - strobe:
           name: "Blink Red"
@@ -332,15 +338,15 @@ light:
   - platform: partition
     id: led_lock
     name: "Lock Indicator" # U13
-    segments: [{id: addressable_strip, from: 10, to: 10}]
+    segments: [{id: addressable_strip, from: 1, to: 1}]
   - platform: partition
     id: led_speed3
     name: "Speed 3 Indicator"
-    segments: [{id: addressable_strip, from: 11, to: 11}]
+    segments: [{id: addressable_strip, from: 12, to: 12}]
   - platform: partition
     id: led_speed2
     name: "Speed 2 Indicator"
-    segments: [{id: addressable_strip, from: 12, to: 12}]
+    segments: [{id: addressable_strip, from: 11, to: 11}]
   - platform: partition
     id: led_speed1
     name: "Speed 1 Indicator"
@@ -348,17 +354,21 @@ light:
 
 # --- CAPACITIVE TOUCH BUTTON CONTROLS ---
 binary_sensor:
-  # Lock Button (Channel 3) - Hold to toggle lock state
+  # Lock Button (Channel 9) - Hold to toggle lock state
   - platform: mpr121
     mpr121_id: mpr121_hub
-    channel: 4
+    channel: 9
     name: "Lock Button"
     id: button_lock
+    on_press:
+      then:
+        - logger.log:
+            level: INFO
+            format: "Button press channel 9 (lock)"
     on_click:
       - min_length: 500ms
         max_length: 1000ms
         then:
-          - logger.log: "Lock Btn"
           - if:
               condition:
                 lambda: 'return !id(child_lock_button).state;'
@@ -366,10 +376,12 @@ binary_sensor:
                 - globals.set:
                     id: g_is_locked
                     value: !lambda 'return !id(g_is_locked);'
-                - logger.log: "Lock State Toggled"
+                - logger.log:
+                    level: INFO
+                    format: "Lock State Toggled"
                 - script.execute: update_led_indicators
 
-  # Sleep Button (Channel 4)
+  # Sleep Button (Channel 3)
   - platform: mpr121
     mpr121_id: mpr121_hub
     channel: 3
@@ -377,6 +389,9 @@ binary_sensor:
     id: button_sleep
     on_press:
       then:
+        - logger.log:
+            level: INFO
+            format: "Button press channel 3 (sleep)"
         - if:
             condition:
               lambda: 'return !id(child_lock_button).state && !id(g_is_locked) && id(g_fan_speed) > 0;'
@@ -385,7 +400,7 @@ binary_sensor:
                   id: set_fan_speed
                   target_speed: 1
 
-  # Timer Button (Channel 5)
+  # Timer Button (Channel 7)
   - platform: mpr121
     mpr121_id: mpr121_hub
     channel: 7
@@ -393,6 +408,9 @@ binary_sensor:
     id: button_timer
     on_press:
       then:
+        - logger.log:
+            level: INFO
+            format: "Button press channel 7 (timer)"
         - if:
             condition:
               lambda: 'return !id(child_lock_button).state && !id(g_is_locked) && id(g_fan_speed) > 0;'
@@ -404,12 +422,17 @@ binary_sensor:
                     return (current >= 4) ? 0 : current + 1;
               - script.execute: update_led_indicators
 
-  # Filter Reset Button (Channel 6) - Hold to reset runtime counter
+  # Filter Reset Button (Channel 4) - Hold to reset runtime counter
   - platform: mpr121
     mpr121_id: mpr121_hub
     channel: 4
     name: "Filter Reset Button"
     id: button_filter_reset
+    on_press:
+      then:
+        - logger.log:
+            level: INFO
+            format: "Button press channel 4 (filter)"
     on_multi_click:
       - timing:
           - ON for at least 1000ms
@@ -421,10 +444,12 @@ binary_sensor:
                 - globals.set:
                     id: g_filter_runtime_seconds
                     value: '0'
-                - logger.log: "Filter runtime timer reset to 0."
+                - logger.log:
+                    level: INFO
+                    format: "Filter runtime timer reset to 0."
                 - script.execute: update_led_indicators
 
-  # LED On/Off Toggle (Channel 7)
+  # LED On/Off Toggle (Channel 5)
   - platform: mpr121
     mpr121_id: mpr121_hub
     channel: 5
@@ -432,6 +457,9 @@ binary_sensor:
     id: button_light
     on_press:
       then:
+        - logger.log:
+            level: INFO
+            format: "Button press channel 5 (light)"
         - if:
             condition:
               lambda: 'return !id(child_lock_button).state && !id(g_is_locked) && id(g_fan_speed) > 0;'
@@ -449,6 +477,9 @@ binary_sensor:
     id: button_power
     on_press:
       then:
+        - logger.log:
+            level: INFO
+            format: "Button press channel 8 (power)"
         - if:
             condition:
               lambda: 'return !id(child_lock_button).state && !id(g_is_locked);'
@@ -457,7 +488,9 @@ binary_sensor:
                   condition:
                     lambda: 'return id(g_fan_speed) > 0;'
                   then:
-                    - logger.log: "Power Off"
+                    - logger.log:
+                        level: INFO
+                        format: "Power Off"
                     - globals.set:
                         id: g_last_active_speed
                         value: !lambda 'return (id(g_fan_speed) > 0) ? id(g_fan_speed) : id(g_last_active_speed);'
@@ -465,13 +498,15 @@ binary_sensor:
                         id: set_fan_speed
                         target_speed: 0
                   else:
-                    - logger.log: "Power On"
+                    - logger.log:
+                        level: INFO
+                        format: "Power On"
                     - script.execute:
                         id: set_fan_speed
                         target_speed: !lambda |-
                           int target = id(g_last_active_speed);
                           return (target >= 1 && target <= 4) ? target : 2;
-  # Fan Speed Cycle Button (Channel 9)
+  # Fan Speed Cycle Button (Channel 6)
   - platform: mpr121
     mpr121_id: mpr121_hub
     channel: 6
@@ -479,6 +514,9 @@ binary_sensor:
     id: button_fan_speed
     on_press:
       then:
+        - logger.log:
+            level: INFO
+            format: "Button press channel 6 (fan)"
         - if:
             condition:
               lambda: 'return !id(child_lock_button).state && !id(g_is_locked) && id(g_fan_speed) > 0;'
