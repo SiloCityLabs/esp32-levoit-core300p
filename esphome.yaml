@@ -76,6 +76,7 @@ i2c:
   sda: GPIO22 # D4
   scl: GPIO23 # D5
   scan: true
+  frequency: 400kHz
 
 mpr121:
   id: mpr121_hub
@@ -112,9 +113,10 @@ globals:
   - id: g_is_child_locked
     type: bool
     initial_value: 'false'
-  - id: g_leds_enabled
-    type: bool
-    initial_value: 'true'
+  - id: g_led_brightness
+    type: int
+    restore_value: true
+    initial_value: '100' # 0=Off, 10, 25, 50, 100
   - id: g_fan_speed
     type: int
     restore_value: true
@@ -161,8 +163,10 @@ output:
     id: output_speed_3
 
 # --- HELPER SCRIPTS ---
+# mode: restart so rapid button presses aren't dropped while LEDs update
 script:
   - id: set_fan_speed
+    mode: restart
     parameters:
       target_speed: int
     then:
@@ -186,85 +190,107 @@ script:
           }
       - script.execute: update_led_indicators
 
+  # Paint the whole WS2812 strip in one write instead of N partition perform()s.
+  # Partition lights are kept for HA visibility + pulse/blink effects only.
   - id: update_led_indicators
+    mode: restart
     then:
       - lambda: |-
-          ESP_LOGD("debug lambda", "update_led_indicators");
-          // Use g_fan_speed as single source-of-truth for power state.
-          // If power is OFF (fan_speed == 0) -> turn off all LEDs except power LED slow-pulse red,
-          // but only if LEDs are enabled.
+          auto *strip = static_cast<light::AddressableLight *>(
+              id(addressable_strip).get_output());
+          const int bri_pct = id(g_led_brightness);
+          const float bri = bri_pct / 100.0f;
+          const bool leds_on = bri_pct > 0;
+          const Color OFF = Color::BLACK;
+          const Color ON = Color(255, 255, 255);
+          const Color GREEN = Color(0, 255, 0);
+          const Color ORANGE = Color(255, 128, 0);
+
+          auto ensure_strip_on = [bri]() {
+            auto call = id(addressable_strip).turn_on();
+            call.set_brightness(bri);
+            call.set_effect("None");
+            call.perform();
+          };
+
+          auto strip_off = []() {
+            auto call = id(addressable_strip).turn_off();
+            call.set_transition_length(0);
+            call.perform();
+          };
+
+          // Power OFF: clear strip, optional slow-pulse red on power LED.
           if (id(g_fan_speed) == 0) {
-            id(addressable_strip).turn_off().perform();
-            if (!id(g_leds_enabled)) {
-              id(led_power).turn_off().perform();
+            strip_off();
+            {
+              auto call = id(led_filter).turn_off();
+              call.set_transition_length(0);
+              call.perform();
+            }
+            if (!leds_on) {
+              auto call = id(led_power).turn_off();
+              call.set_transition_length(0);
+              call.perform();
               return;
             }
+            // Do not set transition_length with an effect — ESPHome rejects that combo.
             auto p = id(led_power).turn_on();
             p.set_rgb(1.0, 0.0, 0.0);
+            p.set_brightness(bri);
             p.set_effect("Slow Pulse Red");
             p.perform();
             return;
           }
 
-          // Power is ON. If LEDs are disabled globally, ensure strip and power LED are off.
-          if (!id(g_leds_enabled)) {
-            ESP_LOGD("debug lambda", "LEDs disabled");
-            id(addressable_strip).turn_off().perform();
-            id(led_power).turn_off().perform();
+          // Power ON but LEDs at 0% brightness.
+          if (!leds_on) {
+            strip_off();
             return;
           }
 
-          // Power and LEDs are ON: show solid green power LED and continue with other indicators.
-          auto p = id(led_power).turn_on();
-          p.set_effect("None");
-          p.set_rgb(0.0, 1.0, 0.0);
-          p.perform();
-          ESP_LOGD("debug lambda", "power LED green");
+          // Power ON + LEDs enabled: one buffer paint + one schedule_show.
+          ensure_strip_on();
+          // Stop power-off pulse effect so it doesn't keep overwriting index 0.
+          {
+            auto call = id(led_power).turn_on();
+            call.set_effect("None");
+            call.perform();
+          }
+          strip->all() = OFF;
 
-          // Helper lambda for binary light toggles
-          auto set_led = [](esphome::light::LightState *led, bool state) {
-            ESP_LOGD("debug lambda", "set_led");
-            if (state) {
-              auto call = led->turn_on();
-              call.perform();
-            } else {
-              led->turn_off().perform();
-            }
-          };
+          // Index map matches partition segments below.
+          strip->get(0) = GREEN;  // power
+          strip->get(1) = (id(g_is_locked) || id(child_lock_button).state) ? ON : OFF;  // lock
+          // filter (index 2) handled below
+          strip->get(3) = ON;  // leds brightness indicator (on when > 0%)
+          strip->get(4) = (id(g_timer_mode) == 4) ? ON : OFF;  // 8h
+          strip->get(5) = (id(g_timer_mode) == 3) ? ON : OFF;  // 6h
+          strip->get(6) = (id(g_timer_mode) == 2) ? ON : OFF;  // 4h
+          strip->get(7) = (id(g_timer_mode) == 1) ? ON : OFF;  // 2h
+          strip->get(8) = (id(g_timer_mode) > 0) ? ON : OFF;   // timer
+          strip->get(9) = (id(g_fan_speed) == 1) ? ON : OFF;    // sleep
+          strip->get(10) = (id(g_fan_speed) > 0) ? ON : OFF;    // fan on
+          strip->get(11) = (id(g_fan_speed) == 3) ? ON : OFF;   // speed 2
+          strip->get(12) = (id(g_fan_speed) == 4) ? ON : OFF;   // speed 3
+          strip->get(13) = (id(g_fan_speed) == 2) ? ON : OFF;   // speed 1
 
-          // Speed LEDs
-          set_led(id(led_fan_on), id(g_fan_speed) > 0);
-          set_led(id(led_sleep), id(g_fan_speed) == 1);
-          set_led(id(led_speed1), id(g_fan_speed) == 2);
-          set_led(id(led_speed2), id(g_fan_speed) == 3);
-          set_led(id(led_speed3), id(g_fan_speed) == 4);
-
-          // Timer LEDs
-          set_led(id(led_timer), id(g_timer_mode) > 0);
-          set_led(id(led_2h), id(g_timer_mode) == 1);
-          set_led(id(led_4h), id(g_timer_mode) == 2);
-          set_led(id(led_6h), id(g_timer_mode) == 3);
-          set_led(id(led_8h), id(g_timer_mode) == 4);
-
-          // Control LEDs
-          set_led(id(led_leds_toggle), id(g_leds_enabled));
-          set_led(id(led_lock), id(g_is_locked) || id(child_lock_button).state);
-
-          // Filter LED Warning Threshold Logic
           int runtime = id(g_filter_runtime_seconds);
           if (runtime >= 28800000) {
-            // 8000 hours blink red
+            // Flush static LEDs, then let the partition effect own index 2.
+            strip->schedule_show();
             auto call = id(led_filter).turn_on();
             call.set_effect("Blink Red");
-            call.perform();
-          } else if (runtime >= 14400000) {
-            // 4000 hours turn on orange
-            auto call = id(led_filter).turn_on();
-            call.set_effect("None");
-            call.set_rgb(1.0, 0.5, 0.0);
+            call.set_brightness(bri);
             call.perform();
           } else {
-            id(led_filter).turn_off().perform();
+            // Stop any blink effect, then paint solid orange / off in the buffer.
+            {
+              auto call = id(led_filter).turn_off();
+              call.set_transition_length(0);
+              call.perform();
+            }
+            strip->get(2) = (runtime >= 14400000) ? ORANGE : OFF;
+            strip->schedule_show();
           }
 
 # --- WS2812 LED STRIP & PARTITIONS ---
@@ -276,9 +302,11 @@ light:
     chipset: WS2812
     num_leds: 14
     rgb_order: GRB
+    default_transition_length: 0s
   - platform: partition
     id: led_power
     name: "Power LED" # U3
+    default_transition_length: 0s
     segments: [{id: addressable_strip, from: 0, to: 0}]
     effects:
       - pulse:
@@ -322,6 +350,7 @@ light:
   - platform: partition
     id: led_filter
     name: "Filter Reset Indicator" # U12
+    default_transition_length: 0s
     segments: [{id: addressable_strip, from: 2, to: 2}]
     effects:
       - strobe:
@@ -366,8 +395,8 @@ binary_sensor:
             level: INFO
             format: "Button press channel 9 (lock)"
     on_click:
-      - min_length: 500ms
-        max_length: 1000ms
+      - min_length: 2000ms
+        max_length: 5000ms
         then:
           - if:
               condition:
@@ -410,7 +439,12 @@ binary_sensor:
       then:
         - logger.log:
             level: INFO
-            format: "Button press channel 7 (timer)"
+            format: "Button press channel 7 (timer) locked=%d child_lock=%d fan=%d mode=%d"
+            args:
+              - 'id(g_is_locked)'
+              - 'id(child_lock_button).state'
+              - 'id(g_fan_speed)'
+              - 'id(g_timer_mode)'
         - if:
             condition:
               lambda: 'return !id(child_lock_button).state && !id(g_is_locked) && id(g_fan_speed) > 0;'
@@ -420,7 +454,15 @@ binary_sensor:
                   value: !lambda |-
                     int current = id(g_timer_mode);
                     return (current >= 4) ? 0 : current + 1;
+              - logger.log:
+                  level: INFO
+                  format: "Timer mode set to %d (0=off,1=2h,2=4h,3=6h,4=8h)"
+                  args: ['id(g_timer_mode)']
               - script.execute: update_led_indicators
+            else:
+              - logger.log:
+                  level: WARN
+                  format: "Timer ignored (need unlocked + fan on)"
 
   # Filter Reset Button (Channel 4) - Hold to reset runtime counter
   - platform: mpr121
@@ -432,11 +474,25 @@ binary_sensor:
       then:
         - logger.log:
             level: INFO
-            format: "Button press channel 4 (filter)"
+            format: "Button press channel 4 (filter) runtime=%ds — hold 5s to reset"
+            args: ['id(g_filter_runtime_seconds)']
+    on_release:
+      then:
+        - logger.log:
+            level: INFO
+            format: "Filter button released (hold must reach 5s to reset)"
     on_multi_click:
       - timing:
-          - ON for at least 1000ms
+          - ON for at least 5000ms
         then:
+          - logger.log:
+              level: INFO
+              format: "Filter hold detected (5s+) locked=%d child_lock=%d fan=%d runtime=%ds"
+              args:
+                - 'id(g_is_locked)'
+                - 'id(child_lock_button).state'
+                - 'id(g_fan_speed)'
+                - 'id(g_filter_runtime_seconds)'
           - if:
               condition:
                 lambda: 'return !id(child_lock_button).state && !id(g_is_locked) && id(g_fan_speed) > 0;'
@@ -446,10 +502,14 @@ binary_sensor:
                     value: '0'
                 - logger.log:
                     level: INFO
-                    format: "Filter runtime timer reset to 0."
+                    format: "Filter runtime reset to 0."
                 - script.execute: update_led_indicators
+              else:
+                - logger.log:
+                    level: WARN
+                    format: "Filter reset ignored (need unlocked + fan on)"
 
-  # LED On/Off Toggle (Channel 5)
+  # LED Brightness Cycle (Channel 5): 0% -> 10% -> 25% -> 50% -> 100% -> 0%
   - platform: mpr121
     mpr121_id: mpr121_hub
     channel: 5
@@ -465,8 +525,19 @@ binary_sensor:
               lambda: 'return !id(child_lock_button).state && !id(g_is_locked) && id(g_fan_speed) > 0;'
             then:
               - globals.set:
-                  id: g_leds_enabled
-                  value: !lambda 'return !id(g_leds_enabled);'
+                  id: g_led_brightness
+                  value: !lambda |-
+                    const int levels[] = {0, 10, 25, 50, 100};
+                    const int cur = id(g_led_brightness);
+                    for (int i = 0; i < 5; i++) {
+                      if (cur == levels[i])
+                        return levels[(i + 1) % 5];
+                    }
+                    return 100;
+              - logger.log:
+                  level: INFO
+                  format: "LED brightness set to %d%%"
+                  args: ['id(g_led_brightness)']
               - script.execute: update_led_indicators
 
   # Power Button (Channel 8)
