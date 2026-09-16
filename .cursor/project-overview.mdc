@@ -1,0 +1,25 @@
+---
+description: Project overview and tech stack for ESP32 Levoit Core 300P fan controller
+alwaysApply: true
+---
+
+# Project Overview
+
+ESPHome firmware for controlling a **Levoit Core 300P** air purifier with a **Seeed XIAO ESP32-C6**.
+
+## Technology
+
+- **ESPHome** YAML (`esphome.yaml`) — primary firmware definition
+- **ESP-IDF** framework on ESP32-C6
+- **Home Assistant** via ESPHome API, Wi-Fi / captive portal / Improv provisioning, OTA updates
+- Capacitive touch (MPR121 over I2C), PWM/status LEDs, GPIO fan-speed relays
+
+## Scope
+
+Hardware pinouts, button/LED mapping, and fan relay control live in this repo; behavior is configured in ESPHome YAML rather than custom C++ application code.
+
+## formatting and style
+- ASCII only in comments/strings: no emoji, no em dash
+-- multi-line comments are best split at punctuation or conjunctions
+-- single-line comments don't need punctuation
+- long lines acceptable

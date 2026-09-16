@@ -152,14 +152,16 @@ output:
   - platform: gpio
     pin: GPIO17 # D7
     id: output_sleep
-  - platform: gpio
-    pin: GPIO19  # D8
-    id: output_speed_1
-  - platform: gpio
-    pin: GPIO20  # D9
-    id: output_speed_2
+  # Pin map from observed hardware
+  # GPIO18 = low, GPIO19 = medium, GPIO20 = high
   - platform: gpio
     pin: GPIO18  # D10
+    id: output_speed_1
+  - platform: gpio
+    pin: GPIO19  # D8
+    id: output_speed_2
+  - platform: gpio
+    pin: GPIO20  # D9
     id: output_speed_3
 
 # --- HELPER SCRIPTS ---
@@ -592,11 +594,11 @@ binary_sensor:
             condition:
               lambda: 'return !id(child_lock_button).state && !id(g_is_locked) && id(g_fan_speed) > 0;'
             then:
-              - globals.set:
-                  id: g_fan_speed
-                  value: !lambda |-
-                    int next_speed = id(g_fan_speed) + 1;
-                    return (next_speed > 4) ? 2 : next_speed;
               - script.execute:
                   id: set_fan_speed
-                  target_speed: !lambda 'return id(g_fan_speed);'
+                  target_speed: !lambda |-
+                    // Cycle low -> medium -> high (2->3->4->2).
+                    // From sleep/off, jump to low.
+                    int cur = id(g_fan_speed);
+                    if (cur < 2 || cur >= 4) return 2;
+                    return cur + 1;
