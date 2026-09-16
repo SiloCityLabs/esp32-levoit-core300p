@@ -15,37 +15,42 @@ blah blah
 |--------------|-----------------------|----------|
 | GPIO22       | I2C SDA (MPR121)      | D4       |
 | GPIO23       | I2C SCL (MPR121)      | D5       |
-| GPIO16       | PWM LED Output        | D6       |
+| GPIO16       | LED Strip (WS2812)    | D6       |
 | GPIO17       | Fan Relay - Sleep     | D7       |
-| GPIO19       | Fan Relay - Speed 1   | D8       |
-| GPIO20       | Fan Relay - Speed 2   | D9       |
-| GPIO18       | Fan Relay - Speed 3   | D10      |
+| GPIO19       | Fan Relay - Low       | D8       |
+| GPIO20       | Fan Relay - Medium    | D9       |
+| GPIO18       | Fan Relay - High      | D10      |
 
 Capacitive buttons
 
 | MPR121 Channel | Function             |
 |----------------|----------------------|
-| 3              | Lock                 |
-| 4              | Sleep                |
-| 5              | Timer                |
-| 6              | Filter Reset         |
-| 7              | Lights Toggle        |
+| 3              | Sleep                |
+| 4              | Filter Reset         |
+| 5              | Lights Toggle        |
+| 6              | Fan Speed            |
+| 7              | Timer                |
 | 8              | Power                |
-| 9              | Fan Speed            |
+| 9              | Lock                 |
 
-LED addresses. LEDs are chained together, controlled by a single ESP32 pin.
+LED addresses. LEDs are chained together, controlled by a single ESP32 pin (14 LEDs).
 
 | Segment ID          | LED Index | Purpose            |
 |---------------------|----------:|--------------------|
-| power_led           | 0         | Power button       |
+| power_led           | 0         | Power indicator    |
 | lock_led            | 1         | Lock indicator     |
-| sleep_led           | 2         | Sleep mode         |
-| timer_led           | 3         | Timer indicator    |
-| filter_reset_led    | 4         | Filter reset       |
-| lights_led          | 5         | Lights button      |
-| fan_low_led         | 6         | Fan speed low      |
-| fan_medium_led      | 7         | Fan speed medium   |
-| fan_high_led        | 8         | Fan speed high     |
+| filter_reset_led    | 2         | Filter reset       |
+| lights_led          | 3         | Lights / brightness|
+| led_8h              | 4         | Timer 8h           |
+| led_6h              | 5         | Timer 6h           |
+| led_4h              | 6         | Timer 4h           |
+| led_2h              | 7         | Timer 2h           |
+| timer_led           | 8         | Timer active       |
+| sleep_led           | 9         | Sleep mode         |
+| fan_on_led          | 10        | Fan on             |
+| fan_low_led         | 11        | Fan speed low      |
+| fan_medium_led      | 12        | Fan speed medium   |
+| fan_high_led        | 13        | Fan speed high     |
 
  - [ESPHome Configuration File](esphome.yaml)
 
