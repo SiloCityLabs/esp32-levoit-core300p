@@ -9,7 +9,7 @@ ESPHome firmware for controlling a **Levoit Core 300P** air purifier with a **Se
 
 ## Technology
 
-- **ESPHome** YAML (`esphome.yaml`) — primary firmware definition
+- **ESPHome** YAML (`esphome.yaml`) - primary firmware definition
 - **ESP-IDF** framework on ESP32-C6
 - **Home Assistant** via ESPHome API, Wi-Fi / captive portal / Improv provisioning, OTA updates
 - Capacitive touch (MPR121 over I2C), PWM/status LEDs, GPIO fan-speed relays
@@ -19,7 +19,10 @@ ESPHome firmware for controlling a **Levoit Core 300P** air purifier with a **Se
 Hardware pinouts, button/LED mapping, and fan relay control live in this repo; behavior is configured in ESPHome YAML rather than custom C++ application code.
 
 ## formatting and style
-- ASCII only in comments/strings: no emoji, no em dash
+- ASCII only in comments/strings. EX:
+-- no emoji
+-- no em dash, use dash `-`
+-- no unicode arrow, use `->`
 -- multi-line comments are best split at punctuation or conjunctions
 -- single-line comments don't need punctuation
 - long lines acceptable

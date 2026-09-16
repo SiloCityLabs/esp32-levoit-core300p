@@ -21,6 +21,16 @@ esphome:
     name: silocitylabs.esp32-levoit-core300p
     version: "1.3.0"
 
+  # Phantom light-button storms can persist bri=0 in NVS and leave the unit dark.
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          if (id(g_led_brightness) <= 0)
+            id(g_led_brightness) = 25;
+          id(g_led_render_mode) = 0;
+      - script.execute: update_led_indicators
+
 esp32:
   board: seeed_xiao_esp32c6
   framework:
@@ -81,8 +91,9 @@ i2c:
 mpr121:
   id: mpr121_hub
   address: 0x5A
-  touch_threshold: 8
-  release_threshold: 5
+  # low theshold is needed for the front panel, but too low causes phantom button presses
+  touch_threshold: 12
+  release_threshold: 8
 
 # button entities accessible in ESPHome
 # restarts ESP32
@@ -116,7 +127,7 @@ globals:
   - id: g_led_brightness
     type: int
     restore_value: true
-    initial_value: '100' # 0=Off, 10, 25, 50, 100
+    initial_value: '25' # 0=Off, 25, 50, 100
   - id: g_fan_speed
     type: int
     restore_value: true
@@ -132,6 +143,23 @@ globals:
     type: int
     restore_value: true
     initial_value: '0' # Accumulated motor runtime in seconds
+  - id: g_sleep_lockout_ms
+    type: uint32_t
+    initial_value: '0' # millis() until sleep button accepted again
+  - id: g_fan_lockout_ms
+    type: uint32_t
+    initial_value: '0' # millis() until fan button accepted again
+  - id: g_light_lockout_ms
+    type: uint32_t
+    initial_value: '0' # millis() until lights button accepted again
+  # Ignore ch4/ch5 touches after LED writes (WS2812 edges couple into those pads).
+  - id: g_touch_mute_until_ms
+    type: uint32_t
+    initial_value: '0'
+  # 0=unknown, 1=power-off idle red, 2=power-on static, 3=all dark, 4=on+filter blink
+  - id: g_led_render_mode
+    type: int
+    initial_value: '0'
 
 # --- FILTER RUNTIME TRACKING INTERVAL ---
 # Tracks active fan runtime and writes to persistent memory
@@ -152,148 +180,165 @@ output:
   - platform: gpio
     pin: GPIO17 # D7
     id: output_sleep
-  # Pin map from observed hardware
-  # GPIO18 = low, GPIO19 = medium, GPIO20 = high
-  - platform: gpio
-    pin: GPIO18  # D10
-    id: output_speed_1
+  # low=GPIO19, medium=GPIO20, high=GPIO18. Confirmed with testing.
   - platform: gpio
     pin: GPIO19  # D8
-    id: output_speed_2
+    id: output_speed_1
   - platform: gpio
     pin: GPIO20  # D9
+    id: output_speed_2
+  - platform: gpio
+    pin: GPIO18  # D10
     id: output_speed_3
 
 # --- HELPER SCRIPTS ---
-# mode: restart so rapid button presses aren't dropped while LEDs update
+# Relay writes stay in one lambda so mode:restart cannot leave lines floating.
 script:
   - id: set_fan_speed
     mode: restart
     parameters:
       target_speed: int
     then:
-      - output.turn_off: output_sleep
-      - output.turn_off: output_speed_1
-      - output.turn_off: output_speed_2
-      - output.turn_off: output_speed_3
-      - globals.set:
-          id: g_fan_speed
-          value: !lambda 'return target_speed;'
-      - globals.set:
-          id: g_last_active_speed
-          value: !lambda 'return (target_speed > 0) ? target_speed : id(g_last_active_speed);'
       - lambda: |-
-          switch(target_speed) {
+          const int prev = id(g_fan_speed);
+          const int target = target_speed;
+          id(g_fan_speed) = target;
+          if (target >= 2 && target <= 4)
+            id(g_last_active_speed) = target;
+
+          // Assert the target line first, then clear the others (make-before-break).
+          // Avoids an all-off gap when leaving sleep.
+          switch (target) {
             case 1: id(output_sleep).turn_on(); break;
             case 2: id(output_speed_1).turn_on(); break;
             case 3: id(output_speed_2).turn_on(); break;
             case 4: id(output_speed_3).turn_on(); break;
             default: break;
           }
+          if (target != 1) id(output_sleep).turn_off();
+          if (target != 2) id(output_speed_1).turn_off();
+          if (target != 3) id(output_speed_2).turn_off();
+          if (target != 4) id(output_speed_3).turn_off();
+
+          ESP_LOGI("main", "set_fan_speed prev=%d target=%d", prev, target);
+      - logger.log:
+          level: INFO
+          format: "set_fan_speed done fan=%d"
+          args: ['id(g_fan_speed)']
       - script.execute: update_led_indicators
 
-  # Paint the whole WS2812 strip in one write instead of N partition perform()s.
-  # Partition lights are kept for HA visibility + pulse/blink effects only.
+  # Single owner for pixels: the parent addressable strip.
+  # Partitions are only used for the rare filter-blink effect.
   - id: update_led_indicators
     mode: restart
     then:
       - lambda: |-
           auto *strip = static_cast<light::AddressableLight *>(
               id(addressable_strip).get_output());
-          const int bri_pct = id(g_led_brightness);
+          int bri_pct = id(g_led_brightness);
+          if (bri_pct < 0) bri_pct = 0;
+          if (bri_pct > 100) bri_pct = 100;
           const float bri = bri_pct / 100.0f;
           const bool leds_on = bri_pct > 0;
           const Color OFF = Color::BLACK;
           const Color ON = Color(255, 255, 255);
           const Color GREEN = Color(0, 255, 0);
+          const Color RED = Color(255, 0, 0);
           const Color ORANGE = Color(255, 128, 0);
+          const bool filter_blink = id(g_filter_runtime_seconds) >= 28800000;
+          const bool filter_warn = id(g_filter_runtime_seconds) >= 14400000;
 
-          auto ensure_strip_on = [bri]() {
-            auto call = id(addressable_strip).turn_on();
-            call.set_brightness(bri);
-            call.set_effect("None");
-            call.perform();
-          };
+          ESP_LOGI("main", "update_leds fan=%d bri=%d", id(g_fan_speed), bri_pct);
 
-          auto strip_off = []() {
-            auto call = id(addressable_strip).turn_off();
+          auto partition_off = [](light::LightState *lit) {
+            auto call = lit->turn_off();
             call.set_transition_length(0);
             call.perform();
           };
 
-          // Power OFF: clear strip, optional slow-pulse red on power LED.
+          auto mute_touch_pads = []() {
+            id(g_touch_mute_until_ms) = millis() + 250;
+          };
+
+          // Always release partition ownership before parent buffer writes.
+          partition_off(id(led_power));
+          if (!filter_blink)
+            partition_off(id(led_filter));
+
+          // Power OFF: solid standby red on pixel 0 (no PWM / no pulse effect).
           if (id(g_fan_speed) == 0) {
-            strip_off();
-            {
-              auto call = id(led_filter).turn_off();
-              call.set_transition_length(0);
-              call.perform();
-            }
             if (!leds_on) {
-              auto call = id(led_power).turn_off();
+              auto call = id(addressable_strip).turn_off();
               call.set_transition_length(0);
               call.perform();
+              id(g_led_render_mode) = 3;
+              mute_touch_pads();
               return;
             }
-            // Do not set transition_length with an effect — ESPHome rejects that combo.
-            auto p = id(led_power).turn_on();
-            p.set_rgb(1.0, 0.0, 0.0);
-            p.set_brightness(bri);
-            p.set_effect("Slow Pulse Red");
-            p.perform();
+            {
+              auto call = id(addressable_strip).turn_on();
+              call.set_transition_length(0);
+              call.set_brightness(bri);
+              call.set_effect("None");
+              call.perform();
+            }
+            strip->all() = OFF;
+            strip->get(0) = RED;
+            strip->schedule_show();
+            id(g_led_render_mode) = 1;
+            mute_touch_pads();
             return;
           }
 
-          // Power ON but LEDs at 0% brightness.
+          // Power ON, lights disabled.
           if (!leds_on) {
-            strip_off();
+            auto call = id(addressable_strip).turn_off();
+            call.set_transition_length(0);
+            call.perform();
+            id(g_led_render_mode) = 3;
+            mute_touch_pads();
             return;
           }
 
-          // Power ON + LEDs enabled: one buffer paint + one schedule_show.
-          ensure_strip_on();
-          // Stop power-off pulse effect so it doesn't keep overwriting index 0.
+          // Power ON, lights enabled: paint full status on parent strip.
           {
-            auto call = id(led_power).turn_on();
+            auto call = id(addressable_strip).turn_on();
+            call.set_transition_length(0);
+            call.set_brightness(bri);
             call.set_effect("None");
             call.perform();
           }
           strip->all() = OFF;
+          strip->get(0) = GREEN;
+          strip->get(1) = (id(g_is_locked) || id(child_lock_button).state) ? ON : OFF;
+          strip->get(3) = ON;
+          strip->get(4) = (id(g_timer_mode) == 4) ? ON : OFF;
+          strip->get(5) = (id(g_timer_mode) == 3) ? ON : OFF;
+          strip->get(6) = (id(g_timer_mode) == 2) ? ON : OFF;
+          strip->get(7) = (id(g_timer_mode) == 1) ? ON : OFF;
+          strip->get(8) = (id(g_timer_mode) > 0) ? ON : OFF;
+          strip->get(9) = (id(g_fan_speed) == 1) ? ON : OFF;
+          strip->get(10) = (id(g_fan_speed) > 0) ? ON : OFF;
+          // Speed LEDs (panel-verified): idx11=low, idx12=medium, idx13=high
+          strip->get(11) = (id(g_fan_speed) == 2) ? ON : OFF;   // low
+          strip->get(12) = (id(g_fan_speed) == 3) ? ON : OFF;   // medium
+          strip->get(13) = (id(g_fan_speed) == 4) ? ON : OFF;   // high
 
-          // Index map matches partition segments below.
-          strip->get(0) = GREEN;  // power
-          strip->get(1) = (id(g_is_locked) || id(child_lock_button).state) ? ON : OFF;  // lock
-          // filter (index 2) handled below
-          strip->get(3) = ON;  // leds brightness indicator (on when > 0%)
-          strip->get(4) = (id(g_timer_mode) == 4) ? ON : OFF;  // 8h
-          strip->get(5) = (id(g_timer_mode) == 3) ? ON : OFF;  // 6h
-          strip->get(6) = (id(g_timer_mode) == 2) ? ON : OFF;  // 4h
-          strip->get(7) = (id(g_timer_mode) == 1) ? ON : OFF;  // 2h
-          strip->get(8) = (id(g_timer_mode) > 0) ? ON : OFF;   // timer
-          strip->get(9) = (id(g_fan_speed) == 1) ? ON : OFF;    // sleep
-          strip->get(10) = (id(g_fan_speed) > 0) ? ON : OFF;    // fan on
-          strip->get(11) = (id(g_fan_speed) == 3) ? ON : OFF;   // speed 2
-          strip->get(12) = (id(g_fan_speed) == 4) ? ON : OFF;   // speed 3
-          strip->get(13) = (id(g_fan_speed) == 2) ? ON : OFF;   // speed 1
-
-          int runtime = id(g_filter_runtime_seconds);
-          if (runtime >= 28800000) {
-            // Flush static LEDs, then let the partition effect own index 2.
+          if (filter_blink) {
+            strip->get(2) = OFF;
             strip->schedule_show();
             auto call = id(led_filter).turn_on();
+            call.set_transition_length(0);
             call.set_effect("Blink Red");
             call.set_brightness(bri);
             call.perform();
+            id(g_led_render_mode) = 4;
           } else {
-            // Stop any blink effect, then paint solid orange / off in the buffer.
-            {
-              auto call = id(led_filter).turn_off();
-              call.set_transition_length(0);
-              call.perform();
-            }
-            strip->get(2) = (runtime >= 14400000) ? ORANGE : OFF;
+            strip->get(2) = filter_warn ? ORANGE : OFF;
             strip->schedule_show();
+            id(g_led_render_mode) = 2;
           }
+          mute_touch_pads();
 
 # --- WS2812 LED STRIP & PARTITIONS ---
 light:
@@ -371,16 +416,16 @@ light:
     name: "Lock Indicator" # U13
     segments: [{id: addressable_strip, from: 1, to: 1}]
   - platform: partition
-    id: led_speed3
-    name: "Speed 3 Indicator"
-    segments: [{id: addressable_strip, from: 12, to: 12}]
+    id: led_speed1
+    name: "Speed 1 Indicator"
+    segments: [{id: addressable_strip, from: 11, to: 11}]
   - platform: partition
     id: led_speed2
     name: "Speed 2 Indicator"
-    segments: [{id: addressable_strip, from: 11, to: 11}]
+    segments: [{id: addressable_strip, from: 12, to: 12}]
   - platform: partition
-    id: led_speed1
-    name: "Speed 1 Indicator"
+    id: led_speed3
+    name: "Speed 3 Indicator"
     segments: [{id: addressable_strip, from: 13, to: 13}]
 
 # --- CAPACITIVE TOUCH BUTTON CONTROLS ---
@@ -412,24 +457,38 @@ binary_sensor:
                     format: "Lock State Toggled"
                 - script.execute: update_led_indicators
 
-  # Sleep Button (Channel 3)
+  # Sleep Button (Channel 3) - toggle sleep; wake always resumes at low
   - platform: mpr121
     mpr121_id: mpr121_hub
     channel: 3
     name: "Sleep Button"
     id: button_sleep
+    filters:
+      # Capacitive contact often double-fires in the same second.
+      - delayed_on: 30ms
+      - delayed_off: 100ms
     on_press:
       then:
         - logger.log:
             level: INFO
-            format: "Button press channel 3 (sleep)"
+            format: "Button press channel 3 (sleep) fan=%d"
+            args: ['id(g_fan_speed)']
         - if:
             condition:
-              lambda: 'return !id(child_lock_button).state && !id(g_is_locked) && id(g_fan_speed) > 0;'
+              lambda: |-
+                if (id(child_lock_button).state || id(g_is_locked) || id(g_fan_speed) <= 0)
+                  return false;
+                uint32_t now = millis();
+                if (now < id(g_sleep_lockout_ms))
+                  return false;
+                id(g_sleep_lockout_ms) = now + 400;
+                return true;
             then:
               - script.execute:
                   id: set_fan_speed
-                  target_speed: 1
+                  target_speed: !lambda |-
+                    // Already sleeping -> wake to low; otherwise enter sleep
+                    return (id(g_fan_speed) == 1) ? 2 : 1;
 
   # Timer Button (Channel 7)
   - platform: mpr121
@@ -467,75 +526,101 @@ binary_sensor:
                   format: "Timer ignored (need unlocked + fan on)"
 
   # Filter Reset Button (Channel 4) - Hold to reset runtime counter
+  # ch4 sits by the filter LED; WS2812 edges false-trigger it.
   - platform: mpr121
     mpr121_id: mpr121_hub
     channel: 4
     name: "Filter Reset Button"
     id: button_filter_reset
+    filters:
+      - delayed_on: 80ms
+      - delayed_off: 120ms
     on_press:
       then:
-        - logger.log:
-            level: INFO
-            format: "Button press channel 4 (filter) runtime=%ds — hold 5s to reset"
-            args: ['id(g_filter_runtime_seconds)']
-    on_release:
-      then:
-        - logger.log:
-            level: INFO
-            format: "Filter button released (hold must reach 5s to reset)"
+        - if:
+            condition:
+              lambda: 'return millis() >= id(g_touch_mute_until_ms);'
+            then:
+              - logger.log:
+                  level: INFO
+                  format: "Button press channel 4 (filter) runtime=%ds - hold 5s to reset"
+                  args: ['id(g_filter_runtime_seconds)']
     on_multi_click:
       - timing:
           - ON for at least 5000ms
         then:
-          - logger.log:
-              level: INFO
-              format: "Filter hold detected (5s+) locked=%d child_lock=%d fan=%d runtime=%ds"
-              args:
-                - 'id(g_is_locked)'
-                - 'id(child_lock_button).state'
-                - 'id(g_fan_speed)'
-                - 'id(g_filter_runtime_seconds)'
           - if:
               condition:
-                lambda: 'return !id(child_lock_button).state && !id(g_is_locked) && id(g_fan_speed) > 0;'
+                lambda: 'return millis() < id(g_touch_mute_until_ms);'
               then:
-                - globals.set:
-                    id: g_filter_runtime_seconds
-                    value: '0'
-                - logger.log:
-                    level: INFO
-                    format: "Filter runtime reset to 0."
-                - script.execute: update_led_indicators
-              else:
                 - logger.log:
                     level: WARN
-                    format: "Filter reset ignored (need unlocked + fan on)"
+                    format: "Filter hold ignored (LED touch mute)"
+              else:
+                - logger.log:
+                    level: INFO
+                    format: "Filter hold detected (5s+) locked=%d child_lock=%d fan=%d runtime=%ds"
+                    args:
+                      - 'id(g_is_locked)'
+                      - 'id(child_lock_button).state'
+                      - 'id(g_fan_speed)'
+                      - 'id(g_filter_runtime_seconds)'
+                - if:
+                    condition:
+                      lambda: 'return !id(child_lock_button).state && !id(g_is_locked) && id(g_fan_speed) > 0;'
+                    then:
+                      - globals.set:
+                          id: g_filter_runtime_seconds
+                          value: '0'
+                      - logger.log:
+                          level: INFO
+                          format: "Filter runtime reset to 0."
+                      - script.execute: update_led_indicators
+                    else:
+                      - logger.log:
+                          level: WARN
+                          format: "Filter reset ignored (need unlocked + fan on)"
 
-  # LED Brightness Cycle (Channel 5): 0% -> 10% -> 25% -> 50% -> 100% -> 0%
+  # LED Brightness Cycle (Channel 5): 0% -> 25% -> 50% -> 100% -> 0%
+  # ch5 sits by the lights LED; WS2812 edges false-trigger it and feedback
+  # into brightness changes (which write more LED edges).
   - platform: mpr121
     mpr121_id: mpr121_hub
     channel: 5
     name: "Lights Toggle Button"
     id: button_light
+    filters:
+      - delayed_on: 80ms
+      - delayed_off: 120ms
     on_press:
       then:
-        - logger.log:
-            level: INFO
-            format: "Button press channel 5 (light)"
         - if:
             condition:
-              lambda: 'return !id(child_lock_button).state && !id(g_is_locked) && id(g_fan_speed) > 0;'
+              lambda: |-
+                if (id(child_lock_button).state || id(g_is_locked) || id(g_fan_speed) <= 0)
+                  return false;
+                uint32_t now = millis();
+                if (now < id(g_touch_mute_until_ms))
+                  return false;
+                if (now < id(g_light_lockout_ms))
+                  return false;
+                id(g_light_lockout_ms) = now + 500;
+                return true;
             then:
+              - logger.log:
+                  level: INFO
+                  format: "Button press channel 5 (light)"
               - globals.set:
                   id: g_led_brightness
                   value: !lambda |-
-                    const int levels[] = {0, 10, 25, 50, 100};
+                    const int levels[] = {0, 25, 50, 100};
                     const int cur = id(g_led_brightness);
-                    for (int i = 0; i < 5; i++) {
+                    for (int i = 0; i < 4; i++) {
                       if (cur == levels[i])
-                        return levels[(i + 1) % 5];
+                        return levels[(i + 1) % 4];
                     }
-                    return 100;
+                    // unknown -> 25%
+                    return 25;
               - logger.log:
                   level: INFO
                   format: "LED brightness set to %d%%"
@@ -578,27 +663,40 @@ binary_sensor:
                         id: set_fan_speed
                         target_speed: !lambda |-
                           int target = id(g_last_active_speed);
-                          return (target >= 1 && target <= 4) ? target : 2;
+                          return (target >= 2 && target <= 4) ? target : 2;
   # Fan Speed Cycle Button (Channel 6)
   - platform: mpr121
     mpr121_id: mpr121_hub
     channel: 6
     name: "Fan Speed Button"
     id: button_fan_speed
+    filters:
+      - delayed_on: 30ms
+      - delayed_off: 100ms
     on_press:
       then:
         - logger.log:
             level: INFO
-            format: "Button press channel 6 (fan)"
+            format: "Button press channel 6 (fan) fan=%d"
+            args: ['id(g_fan_speed)']
         - if:
             condition:
-              lambda: 'return !id(child_lock_button).state && !id(g_is_locked) && id(g_fan_speed) > 0;'
+              lambda: |-
+                if (id(child_lock_button).state || id(g_is_locked) || id(g_fan_speed) <= 0)
+                  return false;
+                uint32_t now = millis();
+                if (now < id(g_fan_lockout_ms))
+                  return false;
+                id(g_fan_lockout_ms) = now + 400;
+                return true;
             then:
               - script.execute:
                   id: set_fan_speed
                   target_speed: !lambda |-
-                    // Cycle low -> medium -> high (2->3->4->2).
-                    // From sleep/off, jump to low.
                     int cur = id(g_fan_speed);
-                    if (cur < 2 || cur >= 4) return 2;
-                    return cur + 1;
+                    // Wake from sleep -> always low (do not advance the 2/3/4 cycle)
+                    if (cur == 1) return 2;
+                    // Cycle low -> medium -> high -> low
+                    if (cur == 2) return 3;
+                    if (cur == 3) return 4;
+                    return 2;
