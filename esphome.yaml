@@ -227,8 +227,8 @@ script:
           args: ['id(g_fan_speed)']
       - script.execute: update_led_indicators
 
-  # Single owner for pixels: the parent addressable strip.
-  # Partitions are only used for the rare filter-blink effect.
+  # Parent strip owns static pixels; power partition used for off-state pulse,
+  # filter partition only for filter-blink effect.
   - id: update_led_indicators
     mode: restart
     then:
@@ -243,7 +243,6 @@ script:
           const Color OFF = Color::BLACK;
           const Color ON = Color(255, 255, 255);
           const Color GREEN = Color(0, 255, 0);
-          const Color RED = Color(255, 0, 0);
           const Color ORANGE = Color(255, 128, 0);
           const bool filter_blink = id(g_filter_runtime_seconds) >= 28800000;
           const bool filter_warn = id(g_filter_runtime_seconds) >= 14400000;
@@ -260,35 +259,36 @@ script:
             id(g_touch_mute_until_ms) = millis() + 250;
           };
 
-          // Always release partition ownership before parent buffer writes.
-          partition_off(id(led_power));
-          if (!filter_blink)
-            partition_off(id(led_filter));
-
-          // Power OFF: solid standby red on pixel 0 (no PWM / no pulse effect).
+          // Power OFF: power partition owns pixel 0 with slow red pulse.
+          // (Pulse PWM can false-trigger ch4/ch5; mute + debounce handle that.)
           if (id(g_fan_speed) == 0) {
-            if (!leds_on) {
+            partition_off(id(led_filter));
+            {
               auto call = id(addressable_strip).turn_off();
               call.set_transition_length(0);
               call.perform();
+            }
+            if (!leds_on) {
+              partition_off(id(led_power));
               id(g_led_render_mode) = 3;
               mute_touch_pads();
               return;
             }
-            {
-              auto call = id(addressable_strip).turn_on();
-              call.set_transition_length(0);
-              call.set_brightness(bri);
-              call.set_effect("None");
-              call.perform();
-            }
-            strip->all() = OFF;
-            strip->get(0) = RED;
-            strip->schedule_show();
+            // Do not set transition_length with an effect - ESPHome rejects that combo.
+            auto p = id(led_power).turn_on();
+            p.set_rgb(1.0, 0.0, 0.0);
+            p.set_brightness(bri);
+            p.set_effect("Slow Pulse Red");
+            p.perform();
             id(g_led_render_mode) = 1;
             mute_touch_pads();
             return;
           }
+
+          // Power ON: release partitions, then paint via parent strip.
+          partition_off(id(led_power));
+          if (!filter_blink)
+            partition_off(id(led_filter));
 
           // Power ON, lights disabled.
           if (!leds_on) {
