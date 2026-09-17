@@ -21,15 +21,20 @@ esphome:
     name: silocitylabs.esp32-levoit-core300p
     version: "1.3.0"
 
-  # Phantom light-button storms can persist bri=0 in NVS and leave the unit dark.
+# ESP32 boot
   on_boot:
     priority: -100
+    # Boot always powered off
     then:
       - lambda: |-
           if (id(g_led_brightness) <= 0)
             id(g_led_brightness) = 25;
           id(g_led_render_mode) = 0;
-      - script.execute: update_led_indicators
+          id(g_timer_mode) = 0;
+          id(g_is_locked) = false;
+      - script.execute:
+          id: set_fan_speed
+          target_speed: 0
 
 esp32:
   board: seeed_xiao_esp32c6
@@ -130,12 +135,12 @@ globals:
     initial_value: '25' # 0=Off, 25, 50, 100
   - id: g_fan_speed
     type: int
-    restore_value: true
-    initial_value: '0' # 0=Off, 1=Sleep, 2=Speed 1, 3=Speed 2, 4=Speed 3
+    restore_value: false
+    initial_value: '0' # 0=Off, 1=Sleep, 2=Low, 3=Medium, 4=High
   - id: g_last_active_speed
     type: int
     restore_value: true
-    initial_value: '2' # Remembers last non-zero speed (Defaults to Speed 1)
+    initial_value: '2' # Last low/med/high for power-on resume
   - id: g_timer_mode
     type: int
     initial_value: '0' # 0=Off, 1=2h, 2=4h, 3=6h, 4=8h
