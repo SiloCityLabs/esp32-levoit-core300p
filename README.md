@@ -1,11 +1,14 @@
-# ESP32-C6 Capacitive Button
+# ESPHOME PCB for Levoit Core 300p  
 
-blah blah
+This is a custom PCB design to convert an Levoit core300p to an esphome compatiable smart device. It features a Xiao Seeed ESP32C6 and a MPR121 touch sensor. Expand this device even further with the 3 exposed GPIO to add temperature, humidity or air quality sensors.
 
 ### Features:
-- button
-- LEDs
--
+- 7x Capacitive Touch "buttons"
+- 14x WS2812 RGB LED
+- Full ESPHOME device exposure
+- 4 Speed Fan Control Transistors
+- AMS1117 1.2A LED LDO
+- 3x Exposed GPIO Expansion Header
 
 ### Quick Start Guide:
 
@@ -54,8 +57,5 @@ LED addresses. LEDs are chained together, controlled by a single ESP32 pin (14 L
 
  - [ESPHome Configuration File](esphome.yaml)
 
-### Configuration:
-...
-
 ### Purchase:
-For purchasing information, please visit our [Product Page](https://shop.silocitylabs.com/products/esp32-button).
+For purchasing information, please visit our [Product Page](https://shop.silocitylabs.com/products/core300-p).
