@@ -1,0 +1,41 @@
+name: ESPHome Stable Compatibility
+
+on:
+  schedule:
+    # Weekly on Thursday at 11:00 UTC (6 AM EST / 7 AM EDT)
+    - cron: '0 11 * * 4'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    name: Validate and compile ESP32-C6
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Pull latest stable ESPHome image
+        run: docker pull ghcr.io/esphome/esphome:stable
+
+      - name: Show ESPHome version
+        run: |
+          docker run --rm ghcr.io/esphome/esphome:stable version
+
+      - name: Validate ESPHome configuration
+        run: |
+          docker run --rm \
+            -v "$PWD:/config" \
+            ghcr.io/esphome/esphome:stable \
+            config esphome.yaml
+
+      - name: Compile ESP32-C6 firmware
+        run: |
+          docker run --rm \
+            -v "$PWD:/config" \
+            ghcr.io/esphome/esphome:stable \
+            compile esphome.yaml
